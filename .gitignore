@@ -1,0 +1,23 @@
+# Local upstream CLI reference; never publish it with the desktop project.
+/reference/
+
+# Local build outputs and release archives.
+/release/
+**/.venv/
+**/build/
+**/dist/
+**/__pycache__/
+**/.pytest_cache/
+*.py[cod]
+*.log
+
+# Temporary files, IDE state and local credentials.
+/_tmptest/
+/.idea/
+.env
+.env.*
+!.env.example
+config.ini
+settings.ini
+cookies.txt
+/plans/account-check.json
