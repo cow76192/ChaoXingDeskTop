@@ -1,4 +1,5 @@
 import time
+from chaoxing_desktop.control import checkpoint, wait
 
 from api.live import Live
 from api.logger import logger
@@ -9,6 +10,7 @@ class LiveProcessor:
     def run_live(live: Live, speed: float = 1.0):
         """循环提交直播时长，直到达到总时长"""
         # 获取直播状态（包含总时长）
+        checkpoint(live, cancel_only=True)
         live_status = live.get_status()
         if not live_status:
             logger.error("直播状态获取失败，无法继续")
@@ -31,17 +33,20 @@ class LiveProcessor:
 
         # 循环提交时长（每59秒一次，模拟持续观看）
         for i in range(total_minutes):
+            checkpoint(live, cancel_only=True)
             logger.info(f"直播'{live.name}'已观看{i + 1}/{total_minutes}分钟")
             success = live.do_finish()  # 提交当前时长
             if not success:
                 logger.warning(f"第{i + 1}分钟时长提交失败，将重试")
                 # 失败重试一次
-                time.sleep(5)
-                live.do_finish()
+                wait(live, 5, cancel_only=True)
+                if not live.do_finish():
+                    logger.error("直播时长提交连续失败，交由章节重试处理")
+                    return False
 
             # 根据倍速调整间隔时间
             sleep_time = 59 / speed
-            time.sleep(sleep_time)
+            wait(live, sleep_time, cancel_only=True)
 
         logger.success(f"直播'{live.name}'时长刷取完成")
         return True

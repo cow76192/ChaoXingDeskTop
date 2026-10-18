@@ -1,57 +1,80 @@
 # 超星 Windows 桌面版
 
-Windows 10/11 x64 桌面应用，Python + Qt（PySide6），GPL-3.0。0.2.2 使用独立的桌面配置、任务调度、AI 和交互流程；平台协议适配层参考并改编自 [Samueli924/chaoxing](https://github.com/Samueli924/chaoxing)。
+**0.3.5** · Windows 10/11 x64 · Python + PySide6 / QML · GPL-3.0。
 
-0.2.2 修复选择题选项误匹配、选项图片丢失、会话重复创建和多个题库 Token 的日志过滤；导入配置中的布尔值统一处理大小写，判断题规则忽略前后空格。检查与回归记录见 `../plans/桌面端0.2.2检查修复验收.md`。
+入口是 `run.py`，Qt Quick 控件使用 FluentWinUI3 和 Fusion / Basic 回退样式。历史 Widgets 界面已移除。
 
-## 直接运行
+## 安装与运行
 
-打开 `dist/ChaoxingDesktop/ChaoxingDesktop.exe`。保留软件所在的完整目录，尤其是 `_internal` 与 `ChaoxingWorker.exe`。便携包无需系统安装 Python。`ChaoxingWorker.exe` 是后台组件，日常使用打开主程序即可。
+安装包默认安装到 `%LOCALAPPDATA%/Programs/ChaoxingDesktop/`，提供桌面 / 开始菜单快捷方式与卸载入口。更新前退出旧程序，安装到原目录即可沿用已有设置、Cookie 和凭据；安装器保留原 `installation.json`。首次安装使用 `%LOCALAPPDATA%/ChaoxingDesktop/profiles/installer-<版本>-<标识>/`，卸载保留个人数据。
 
-首次使用可点击右上角「离线演示」，选择示例课程，点击「开始所选课程」体验任务进度与日志。演示不会登录或连接超星。
+便携程序打开 `ChaoxingDesktop.exe`，并保留完整目录，尤其是 `_internal` 和 `ChaoxingWorker.exe`。后台组件由主程序启动。
 
-## 登录和学习
-
-1. 在「课程与账号」填写账号、密码，点击「登录并读取课程」。也可导入 `name=value; name=value` 格式的 Cookie 文本，并勾选 Cookie 登录。
-2. 勾选课程。课程 ID 相同但班级不同会分开显示。开始任务只处理勾选的课程；登录信息改变后需重新读取课程。
-3. 在「学习设置」调整倍速、并发、关闭章节策略、重做和学习次数选项。
-4. 在「题库与 AI」勾选需要的题库，通过拖动或上移 / 下移调整顺序；分别填写各服务凭据。AI 单独配置地址、密钥与模型，可点击「测试 AI 连接」。仅配置题库、仅配置 AI、同时配置或全部关闭均可。
-   服务参数在未启用时也可以填写；仅在任务运行期间锁定编辑。填写参数不会自动启用服务，AI 连接测试也可在启用前使用。
-5. 题库按顺序先完成查询，AI 只补全题库未解决的题目。可启用「人工补全」，窗口直接显示题目、图片和选项；选择答案、跳过或停止任务均无需终端输入。
-6. 「随机补全」默认关闭。启用后，在题库、AI 和人工补全结束后，随机填写仍未解决的单选、多选和判断题；不会覆盖已有答案。填空与简答保持待处理，随机答案不计入题库 / AI 命中率。
-   默认只保存答案。自动提交由独立开关控制；开启后需要所有题目都已填写（可包含你启用的随机答案）。仍有空白题目时仅保存，不因重做强制提交。
-7. 点击「开始所选课程」，在「任务与日志」观察状态。
-8. 停止按钮和关闭窗口均会终止后台进程；已发送的请求不能撤销。重新运行时读取平台实际进度。
-
-AI 的「模型支持图片识别」独立于 LIKE 知识库的图片识别选项。关闭 AI 图片识别时，图片题保持待处理，不交给纯文本模型猜测。启用后请求包含题干和选项的图片地址，需要所选服务和模型支持视觉输入。连接检查仅验证服务响应，不能替代图片题实测。
-
-「待完成 / 未核验」表示上游处理流程已结束，但平台没有确认章节完成，可能是只保存答案、进度尚未刷新，或核验请求失败；请在平台检查。任务进度条表示本轮处理进度，不表示课程学分完成比例。
-
-## 配置与数据
-
-- 「高级设置」全部为图形化表单，包括查询间隔、请求超时、重试、代理、GO 与 LIKE 参数、判断题识别规则。所有页共用设置，修改后直接用于下一次任务；右上角「保存设置」保存到本机。
-- 可导入旧 INI，自动拆分题库、AI 和人工补全配置。旧的 AI 优先顺序会调整为题库优先；未知扩展字段保留在导出文件中。界面不提供代码编辑器。
-- 「保存设置」写入 `%LOCALAPPDATA%/ChaoxingDesktop/settings.ini`，不保存密码、Token、API Key、通知 URL 等秘密。再次启动使用这些服务时需重新填写或导入配置。
-- 「导出完整 INI」会包含当前密码和密钥，保存对话框已标明。
-- 成功登录会保存本机 Cookie 到相同用户目录，供核心请求使用；「清除 Cookie」可删除。本地 Cookie 采用上游文本格式，文件本身未加密。
-- 默认关闭上游原始文件日志；GUI 日志会过滤配置秘密与会话字段，日志导出仅包含当前显示的最多 2500 个日志块。
-- 0.2.0 不读取旧的题目标题缓存，以免旧 AI 答案绕过题库优先策略，或同名题目产生答案混用；不会向源代码目录或软件目录写入用户配置。
-- 首版未打包可选 OCR。如出现验证码/403，请在浏览器中完成验证再重新运行；依赖原项目服务接口，实际账号登录与课程任务需要真实环境验证。
-
-## 源码运行与测试
-
-在 desktop 目录执行：
+源码运行，在本目录执行：
 
 ```powershell
 python -m venv .venv
 .venv/Scripts/python.exe -m pip install -r requirements.txt
 .venv/Scripts/python.exe run.py
-.venv/Scripts/python.exe -m unittest discover -s tests -p 'test_*.py'
-.venv/Scripts/python.exe tests/gui_smoke.py
 ```
 
-构建：`powershell -ExecutionPolicy Bypass -File scripts/build.ps1`。测试和开发可用 `CHAOXING_DESKTOP_DATA` 指定数据目录。发布所用确切依赖记录于 `requirements-lock.txt`。新版本验证应在联网的独立虚拟环境安装依赖后执行。
+## 使用
 
-## 开源来源
+1. 在「课程与账号」登录或导入 Cookie，读取并选择课程；首次体验可运行「离线演示」。添加账号可保留多个会话，切换账号后需重新读取课程。任务期间锁定账号切换。
+2. 在「学习设置」调整倍速、并发、章节策略和重做选项。在「题库与 AI」配置服务及查询顺序、凭据、间隔、超时和重试。
+3. 开始所选课程，在「任务与日志」查看章节、媒体和逐题结果。「暂停后续」阻止新调度与答题请求；在途请求及当前媒体可继续。停止先协作取消，超时后终止后台。
+4. 题库依次查询，AI 补全未解决题目，人工补全用于剩余答案。随机补全默认关闭，开启后仅处理未解决的单选、多选和判断题。
 
-上游参考仓库为 [Samueli924/chaoxing](https://github.com/Samueli924/chaoxing)；本地 `../reference/chaoxing` 仅用于开发参考，不包含在本仓库中。`vendor/chaoxing` 仅保留改编的平台协议、题库服务适配和字体资源；旧 CLI 入口、配置模板、终端手动作答、旧 AI 与回退实现已删除。桌面端的配置、答题策略、AI、图形交互和调度由 `chaoxing_desktop` 实现。改动与许可见 THIRD_PARTY_NOTICES.md 和 LICENSE。
+默认只保存答案；自动提交需独立开启，且所有题目已有答案。填空按平台可确认的空位逐一对应，多空答案使用 JSON 字符串数组。任务进度不代表学分或平台最终完成；媒体达到时长后仍需平台确认。
+
+声明式 JSON 题库支持 GET/POST、题型映射和响应点路径，不执行导入的 JavaScript。真实服务连接测试可能消耗额度；AI 图片识别需要模型支持视觉输入。
+
+## 账号与本机数据
+
+- 账号列表支持添加、选择、备注和删除，重启后恢复最后选中的账号。每个账号的 Cookie 独立加密保存。导入已绑定账号的 Cookie 时校验平台用户。
+- 设置、账号及默认日志位于 `%LOCALAPPDATA%/ChaoxingDesktop/` 或安装标识选定的 profile。开发测试可通过 `CHAOXING_DESKTOP_DATA` 隔离目录。
+- Cookie、题库 Token、AI Key、代理和通知凭据使用 Windows DPAPI 加密，通常绑定当前 Windows 用户与本机。登录密码不写入账号文件。旧明文 Cookie 成功迁移后删除。
+- 完整 INI 导出包含当前明文密码和密钥，应留在本机。保存失败或检测到其他进程修改时保留原文件，不覆盖更新状态。
+- 界面日志和逐题结果有容量限制，日志先脱敏再显示与写盘。单日志文件约 10 MiB、总量约 100 MiB、保留 14 天；删除仅处理本应用命名的普通日志。
+- 同一数据目录仅运行一个主窗口。重复启动会唤起已有窗口。
+
+验证码使用本地 CPU OCR。识别不可用或验证类型不支持时，相关章节保留待处理；可在平台页面完成验证后重新登录或导入 Cookie。
+
+## 测试
+
+开发与构建使用 Windows x64、Python 3.13.9。构建环境安装 `requirements-lock.txt`，包括运行和测试 / 构建依赖。
+
+```powershell
+.venv-build/Scripts/python.exe -m unittest discover -s tests -p 'test_*.py'
+.venv-build/Scripts/python.exe tests/qml_ui_smoke.py
+.venv-build/Scripts/python.exe tests/accounts_ui_smoke.py
+.venv-build/Scripts/python.exe tests/audit_ui_smoke.py
+.venv-build/Scripts/python.exe tests/performance_smoke.py --tasks 10000 --events 3000 --questions 1000 --rounds 3 --max-round-seconds 20 --max-heartbeat-p95-ms 500 --output build/performance.json
+```
+
+这些测试使用隔离数据和离线模拟。`tests/account_check.py` 是另行执行的手动只读工具，通过隐藏交互输入凭据，不属于离线回归。
+
+## 构建与发布
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -OutputDirectory dist/optimized-0.3.5/ChaoxingDesktop
+.venv-build/Scripts/python.exe scripts/build_installer.py --app dist/optimized-0.3.5/ChaoxingDesktop --compiler <makensis.exe的绝对路径>
+```
+
+构建脚本使用独立 `.venv-build` 环境安装锁定依赖、核对依赖闭包、执行单元和源码界面回归、运行 PyInstaller，并验收冻结 worker 与 QML 界面。可通过 `-Wheelhouse <绝对路径>` 离线安装。依赖更新需重新生成并审阅锁文件。
+
+安装器使用 [NSIS](https://nsis.sourceforge.io/Download)，编译器不随程序分发。安装包含完整程序、许可、第三方声明与对应源码 ZIP。生成安装包前核对程序版本、源码 / 产物哈希和单元、worker、GUI 验收标记；跳过 GUI 的构建不能用于正式发布。
+
+安装器和便携打包统一使用 `scripts/source_bundle.py` 的公共文件清单。源码包只包含运行、测试、构建所需源码、资源、说明与许可，不收集历史计划、截图、验收文档、用户数据或临时文件。
+
+升级时只删除 `scripts/retired-runtime-0.3.5.txt` 列出的具体废弃运行文件，不使用通配符或递归删除，也不删除新程序仍包含的文件。
+
+## 0.3.5 优化
+
+逐题结果每条记录只刷新一次脱敏器；模型直接复制经过校验的数据结构，避免重复 JSON 解析，仍保留嵌套脱敏、快照隔离和容量限制。
+
+发行包仅保留默认使用的 `common_old.onnx`，移除未使用的 beta / 检测模型和 OpenCV 视频 I/O 插件。Qt 按界面导入范围及原生 DLL 依赖闭包收集，保留 FluentWinUI3、Fusion / Basic、Shapes / Effects、SVG、TLS 和软件 OpenGL。平台适配源码已进入 Python 归档，不再重复复制 `.py`；完整源码仍随安装包提供。
+
+## 来源与许可
+
+平台适配参考 [Samueli924/chaoxing](https://github.com/Samueli924/chaoxing)，固定提交 `45d2106b16764231c2de2038fb042e71b23d878f`。运行不依赖本地参考仓库。完整来源、依赖和改动说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 与 [LICENSE](LICENSE)。

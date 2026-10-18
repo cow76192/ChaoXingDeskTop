@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 import json
 import os
 from pathlib import Path
 import sys
 import threading
 import time
+import queue
+import uuid
+from .control import RunControl, Cancelled, ResumeFailed, checkpoint, wait as controlled_wait
+from .query_result import safe_record
 
 from .config import Redactor, resource_root, select_courses
 
@@ -16,17 +20,40 @@ class Channel:
         self.output, self.input_stream, self.redactor = output, input_stream, redactor
         self.lock = threading.Lock()
         self.input_lock = threading.Lock()
+        self.run_id = uuid.uuid4().hex
+        self.control = None
 
-    def send(self, kind: str, **values):
+    def send(self, event_type: str, **values):
         if "message" in values:
             values["message"] = self.redactor(str(values["message"]))
+            if event_type == "log" and len(values["message"]) > 4096:
+                values["message"] = values["message"][:4075] + " …[日志过长，已截断]"
+        if event_type == 'question_result':
+            values = safe_record(values, self.redactor)
+        values.setdefault('run_id', self.run_id)
         with self.lock:
-            self.output.write(json.dumps({"type": kind, **values}, ensure_ascii=False) + "\n")
+            self.output.write(json.dumps({"type": event_type, **values}, ensure_ascii=False) + "\n")
             self.output.flush()
+
+    def enable_control(self):
+        self.control = RunControl(self.send)
+        threading.Thread(target=self.control.read, args=(self.input_stream,), daemon=True).start()
 
     def ask(self, prompt="", **context):
         with self.input_lock:
-            self.send("input", message=prompt, **context)
+            request_id = uuid.uuid4().hex
+            self.send("input", message=prompt, request_id=request_id, **context)
+            if self.control:
+                while True:
+                    self.control.checkpoint()
+                    try:
+                        reply = self.control.replies.get(timeout=.1)
+                    except queue.Empty:
+                        if self.control.eof:
+                            raise Cancelled()
+                        continue
+                    if reply.get('request_id') == request_id:
+                        return str(reply.get('answer', ''))
             line = self.input_stream.readline()
             if not line:
                 raise EOFError("交互已取消")
@@ -66,6 +93,8 @@ def load_core(channel):
     logger.remove()
     logger.add(lambda msg: channel.send("log", message=msg.record["message"], level=msg.record["level"].name),
                level="INFO", colorize=False, backtrace=False, diagnose=False)
+    from api.cxsecret_font import validate_font_resources
+    validate_font_resources()
     from . import runtime
     return runtime
 
@@ -76,7 +105,7 @@ def demo(channel, command):
                dict(courseId="demo-103", clazzId="03", cpi="demo", title="信息素养 · 演示")]
     channel.send("log", message="离线演示模式：所有课程与任务均为示例，没有连接超星。", level="INFO")
     if command["action"] == "courses":
-        time.sleep(0.2)
+        controlled_wait(channel, .2)
         channel.send("courses", courses=courses, demo=True)
         return
     chosen = select_courses(courses, command.get("selected", []))
@@ -84,9 +113,22 @@ def demo(channel, command):
              for c in chosen for i, t in enumerate(("01 · 视频学习", "02 · 阅读材料", "03 · 章节练习"))]
     channel.send("tasks", tasks=tasks)
     for task in tasks:
+        checkpoint(channel)
         channel.send("task", id=task["id"], status="running")
         channel.send("log", message=f"正在处理 {task['course']} / {task['title']}", level="INFO")
-        time.sleep(0.6)
+        if '视频' in task['title']:
+            for position in (0, 40, 80, 120):
+                channel.send('media', id=task['id'], name='离线演示视频', kind='Video',
+                             duration=120, position=position, verified=position == 120)
+                controlled_wait(channel, .15)
+        else:
+            controlled_wait(channel, .6)
+        if '练习' in task['title']:
+            from types import SimpleNamespace
+            from .answers import AnswerRouter
+            router = AnswerRouter(command['config'], channel, [('演示题库', SimpleNamespace(_query=lambda q: '第二项'))])
+            router.set_context(task_id=task['id'], work_id='demo-work', attempt=0)
+            router.query_all([dict(id='demo-question', title='以下哪项是演示答案？', type='single', options='A.第一项\nB.第二项')])
         channel.send("task", id=task["id"], status="success")
     channel.send("done", success=len(tasks), failed=0, skipped=0, pending=0, demo=True)
 
@@ -96,85 +138,147 @@ def run_tasks(channel, tasks, process, config, result_enum):
     pending = list(tasks)
     statuses = {}
     for attempt in range(5):
+        checkpoint(channel)
         retry = []
         with ThreadPoolExecutor(max_workers=config["jobs"]) as executor:
             def execute(task):
+                checkpoint(channel)
                 channel.send("task", id=task["id"], status="running")
                 return process(task)
-            futures = {executor.submit(execute, task): task for task in pending}
-            for future in as_completed(futures):
-                task = futures[future]
-                try:
-                    result = future.result()
-                except Exception as exc:
-                    channel.send("log", message=f"{task['title']}：{type(exc).__name__}: {exc}", level="ERROR")
-                    result = result_enum.ERROR
-                if result == result_enum.SUCCESS:
-                    status = "processed"
-                elif result == result_enum.NOT_OPEN:
-                    action = config["notopen_action"]
-                    if action == "ask":
-                        answer = channel.ask(f"章节「{task['title']}」未开放。", kind="choice",
-                                             choices=[{"label": "跳过当前章节", "value": "y"},
-                                                      {"label": "停止任务", "value": "n"}])
-                        if answer.strip().lower() not in ("y", "yes"):
-                            channel.send("cancelled", message="用户停止了未开放章节的处理。")
-                            os._exit(2)
-                    if action in ("ask", "continue"):
-                        status = "skipped"
-                    elif attempt < 4:
-                        status = "retry"
-                        retry.append(task)
-                    else:
-                        status = "skipped"
-                elif attempt < 4:
-                    status = "retry"
-                    retry.append(task)
-                else:
-                    status = "failed"
-                statuses[task["id"]] = status
-                channel.send("task", id=task["id"], status=status)
+            remaining = iter(pending)
+            futures = {}
+            def fill_slots():
+                while len(futures) < config["jobs"]:
+                    checkpoint(channel)
+                    task = next(remaining, None)
+                    if task is None:
+                        break
+                    futures[executor.submit(execute, task)] = task
+            fill_slots()
+            while futures:
+                checkpoint(channel)
+                completed, _ = wait(futures, timeout=.1, return_when=FIRST_COMPLETED)
+                # Pop completed futures promptly; do not retain every result or
+                # exception traceback until thousands of chapters have finished.
+                for future in completed:
+                    task = futures.pop(future)
+                    handle_result(future, task, attempt, retry, statuses, channel, config, result_enum)
+                fill_slots()
         if not retry:
             break
         channel.send("log", message=f"等待重试 {len(retry)} 个章节（第 {attempt + 2}/5 轮）。", level="WARNING")
-        time.sleep(config["retry_interval"])
+        controlled_wait(channel, config["retry_interval"])
         pending = retry
     return statuses
 
 
+def handle_result(future, task, attempt, retry, statuses, channel, config, result_enum):
+    try:
+        result = future.result()
+    except Exception as exc:
+        channel.send("log", message=f"{task['title']}：{type(exc).__name__}: {exc}", level="ERROR")
+        result = result_enum.ERROR
+    if result == result_enum.SUCCESS:
+        status = "processed"
+    elif getattr(result_enum, 'PENDING', None) is not None and result == result_enum.PENDING:
+        status = "pending"
+    elif result == result_enum.NOT_OPEN:
+        action = config["notopen_action"]
+        if action == "ask":
+            answer = channel.ask(f"章节「{task['title']}」未开放。", kind="choice",
+                                 choices=[{"label": "跳过当前章节", "value": "y"},
+                                          {"label": "停止任务", "value": "n"}])
+            if answer.strip().lower() not in ("y", "yes"):
+                channel.send("cancelled", message="用户停止了未开放章节的处理。")
+                os._exit(2)
+        if action in ("ask", "continue"):
+            status = "skipped"
+        elif attempt < 4:
+            status = "retry"
+            retry.append(task)
+        else:
+            status = "skipped"
+    elif attempt < 4:
+        status = "retry"
+        retry.append(task)
+    else:
+        status = "failed"
+    statuses[task["id"]] = status
+    channel.send("task", id=task["id"], status=status)
+
+
 def real(channel, command):
+    checkpoint(channel)
     core = load_core(channel)
+    checkpoint(channel)
+    account_id = command.get('account_id')
+    if account_id:
+        from .accounts import AccountStore
+        from api.cookies import configure_account
+        store = AccountStore(Path(command['data_dir']))
+        row = store.get(account_id)
+        if not row or row['username'] != command['config']['common']['username']:
+            raise ValueError('账号信息已改变，请重新选择账号。')
+        configure_account(store.cookie_path(account_id), row['uid'], command['config']['common']['use_cookies'])
     common, notification_config = (command["config"][s] for s in ("common", "notification"))
     # Listing courses must not initialize paid question-bank services.
     cx = core.create_client(command["config"], channel, courses_only=command["action"] == "courses")
+    checkpoint(channel)
     login = cx.login(login_with_cookies=common["use_cookies"])
     if not login.get("status"):
         raise RuntimeError(login.get("msg", "登录失败"))
+    if account_id:
+        from .accounts import cookie_uid
+        from api.base import SessionManager
+        from api.cookies import save_cookies
+        session = SessionManager.get_session()
+        uid = cookie_uid(session.cookies.get_dict())
+        if not uid or (row['uid'] and row['uid'] != uid):
+            raise ValueError('平台会话与当前账号不一致，请重新登录或添加为其他账号。')
+        save_cookies(session)
+        channel.send('session_ready', account_id=account_id, uid=uid)
+    checkpoint(channel)
     courses = list({(str(c["courseId"]), str(c["clazzId"])): c for c in cx.get_course_list()}.values())
     if command["action"] == "courses":
         channel.send("courses", courses=courses, demo=False)
         return
     chosen = select_courses(courses, command.get("selected", []))
+    if channel.control:
+        def check_resumed_session():
+            for course in chosen:
+                result = cx.get_course_point(course['courseId'], course['clazzId'], course['cpi'])
+                if not isinstance(result, dict) or not isinstance(result.get('points'), list):
+                    raise ValueError('无法复核课程会话')
+        channel.control.resume_check = check_resumed_session
     tasks = []
+    tasks_by_course = {}
     for course in chosen:
+        checkpoint(channel)
+        course_tasks = []
+        tasks_by_course[(str(course["courseId"]), str(course["clazzId"]))] = course_tasks
         points = cx.get_course_point(course["courseId"], course["clazzId"], course["cpi"])["points"]
         for i, point in enumerate(points):
-            tasks.append(dict(id=f"{course['courseId']}:{course['clazzId']}:{point['id']}:{i}",
-                              title=point["title"], course=course["title"], course_data=course, point=point))
+            task = dict(id=f"{course['courseId']}:{course['clazzId']}:{point['id']}:{i}",
+                        title=point["title"], course=course["title"], course_data=course, point=point)
+            tasks.append(task)
+            course_tasks.append(task)
     channel.send("tasks", tasks=[{k: t[k] for k in ("id", "title", "course")} for t in tasks])
     statuses = run_tasks(channel, tasks,
-                         lambda t: core.process_chapter(cx, t["course_data"], t["point"], common["speed"]),
+                         lambda t: core.process_chapter(cx, t["course_data"], t["point"], common["speed"], t['id']),
                          common, core.ChapterResult)
     # Re-read platform state: saving answers is not completing an exercise.
     for course in chosen:
+        checkpoint(channel)
         try:
             points = cx.get_course_point(course["courseId"], course["clazzId"], course["cpi"])["points"]
             finished = {str(p["id"]): p.get("has_finished", False) for p in points}
         except Exception as exc:
             channel.send("log", message=f"无法核验章节进度：{exc}", level="WARNING")
             finished = {}
-        for task in tasks:
-            if task["course_data"] == course and statuses[task["id"]] == "processed":
+        for task in tasks_by_course[(str(course["courseId"]), str(course["clazzId"]))]:
+            # An earlier media timeout may have settled on the platform while
+            # other chapters ran. Positive final evidence also resolves pending.
+            if statuses[task["id"]] in ("processed", "pending"):
                 status = "success" if finished.get(str(task["point"]["id"]), False) else "pending"
                 statuses[task["id"]] = status
                 channel.send("task", id=task["id"], status=status)
@@ -183,6 +287,7 @@ def real(channel, command):
         for course in chosen:
             core.increase_learning_count_for_course(cx, course, common)
     counts = {s: list(statuses.values()).count(s) for s in ("success", "failed", "skipped", "pending")}
+    checkpoint(channel)
     if notification_config.get("provider"):
         notification = core.Notification()
         notification.config_set(notification_config)
@@ -204,6 +309,8 @@ def main() -> int:
             stream.reconfigure(encoding="utf-8")
     command = json.loads(input_stream.readline())
     channel = Channel(output, input_stream, Redactor(command.get("config", {})))
+    channel.run_id = str(command.get("run_id") or channel.run_id)
+    channel.enable_control()
     try:
         path = Path(command["data_dir"]).resolve()
         path.mkdir(parents=True, exist_ok=True)
@@ -211,8 +318,73 @@ def main() -> int:
         if command.get("action") == "probe":
             load_core(channel)
             from api.cxsecret_font import fonthash_dao
-            assert len(fonthash_dao.char_map) > 100, "字体资源缺失"
-            channel.send("probe", message="核心导入与字体资源加载正常", font_entries=len(fonthash_dao.char_map))
+            # Exercise the packaged v2 helper and Qt image codec without any
+            # credential or network request (the worker has no QApplication).
+            import base64
+            from PySide6.QtCore import QBuffer, QIODevice
+            from PySide6.QtGui import QImage
+            from .bank_question import ImageEncoder, yanxi_environment
+            picture = QImage(1, 1, QImage.Format.Format_RGB32)
+            picture.fill(0xFFFFFF)
+            stream = QBuffer()
+            stream.open(QIODevice.OpenModeFlag.WriteOnly)
+            if not picture.save(stream, 'PNG'):
+                raise RuntimeError('PNG 编码器不可用')
+            source = 'data:image/png;base64,' + base64.b64encode(bytes(stream.data())).decode('ascii')
+            encoder = ImageEncoder()
+            env = yanxi_environment(dict(title='1+1=?', options='a.1 b.2'), encoder)
+            if env['options'] != '1\n2' or env['suggestion_title'] or not encoder.encode(source).startswith('data:image/png;base64,'):
+                raise RuntimeError('题库 v2 参数或图片编码检查失败')
+            from .matching import match_choices
+            match = match_choices('需求牵引#\n改革攻坚#', [('A', '需求牵引'), ('B', '改革攻坚')], 'multiple')
+            if match is None or {key for key, _ in match.pairs} != {'A', 'B'}:
+                raise RuntimeError('相似匹配模块检查失败')
+            quantity = match_choices('1万亿元', [('A', '10000亿元'), ('B', '8000亿元')], 'single')
+            if quantity is None or quantity.pairs[0][0] != 'A':
+                raise RuntimeError('数值单位匹配检查失败')
+            from types import SimpleNamespace
+            from .answers import AnswerRouter
+            from .config import defaults, to_payload
+            review_config = to_payload(defaults())
+            review_config['matching']['bank_review_policy'] = 'ai_dependent'
+            policy_router = AnswerRouter(review_config, SimpleNamespace(send=lambda *args, **kwargs: None))
+            review_question = dict(title='2026年产业占比', type='single', options='A.70%\nB.80%')
+            review_bank = SimpleNamespace(last_result_question='2025年产业占比')
+            if policy_router.normalize_bank_answer('80%', review_question, review_bank) != '80%':
+                raise RuntimeError('AI 关闭时的题库审核策略检查失败')
+            review_config['ai']['enabled'] = 'true'
+            if policy_router.normalize_bank_answer('80%', review_question, review_bank) is not None:
+                raise RuntimeError('AI 开启时的题库审核策略检查失败')
+            # Exercise the actual frozen OCR model and native ONNX runtime,
+            # not just import availability or developer-environment packages.
+            import io
+            from PIL import Image, ImageDraw, ImageFont
+            from api.captcha import ocr_init
+            captcha = Image.new('RGB', (160, 54), 'white')
+            ImageDraw.Draw(captcha).text((8, 6), '1234', font=ImageFont.load_default(size=32), fill='black')
+            captcha_bytes = io.BytesIO()
+            captcha.save(captcha_bytes, format='PNG')
+            ocr = ocr_init()
+            if ocr is None or ocr.classification(captcha_bytes.getvalue()).strip() != '1234':
+                raise RuntimeError('验证码识别模型或运行库检查失败')
+            from .diagnostics import offline_check
+            offline_check()
+            channel.send("probe", ocs_ready=True, message="核心、字体资源、题库 v2 参数、图片编码及验证码识别正常",
+                         font_entries=len(fonthash_dao.char_map), bank_protocol='v2-text-and-images',
+                         matching_ready=True, captcha_ready=True, review_policy_ready=True)
+        elif command.get('action') == 'check_bank':
+            load_core(channel)
+            from .answers import build_answers
+            from .query_result import query_bank, STATE_TEXT
+            router = build_answers(command['config'], channel)
+            if not router.banks:
+                raise ValueError('题库初始化失败，请检查配置')
+            name, bank = router.banks[0]
+            bank.control = channel.control
+            bank.budget_check = lambda: router.consume_budget(('connection-check', name))
+            result = query_bank(name, bank, dict(title='1+1=？', type='single', options='A.1\nB.2'))
+            channel.send('bank_check', ok=result.status in ('hit', 'miss'),
+                         message='真实连接检查：' + STATE_TEXT[result.status] + '；不代表后续命中率或答案正确率。')
         elif command.get("action") == "check_ai":
             from .answers import AIClient
             AIClient(command["config"]["ai"]).check_connection()
@@ -222,6 +394,15 @@ def main() -> int:
         else:
             real(channel, command)
         return 0
+    except ResumeFailed:
+        channel.send("error", message="恢复前无法核验平台会话，任务已停止；请重新登录后再开始。")
+        return 1
+    except Cancelled:
+        if channel.control and channel.control.resume_failed:
+            channel.send("error", message="恢复前无法核验平台会话，任务已停止；请重新登录后再开始。")
+            return 1
+        channel.send("cancelled", message="任务已停止；已送达平台的请求不会撤销。")
+        return 2
     except Exception as exc:
         channel.send("error", message=f"{type(exc).__name__}: {exc}")
         return 1

@@ -1,0 +1,65 @@
+name: Windows offline checks
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.9'
+          architecture: x64
+      - name: Install locked dependencies in an isolated environment
+        shell: pwsh
+        working-directory: desktop
+        run: |
+          python -m venv .venv-ci
+          .venv-ci/Scripts/python.exe -m pip install --no-deps -r requirements-lock.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
+          .venv-ci/Scripts/python.exe scripts/verify_dependencies.py
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency verification failed' }
+          .venv-ci/Scripts/python.exe -m pip check
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency conflicts' }
+      - name: Unit and protocol regressions (no credentials or external services)
+        shell: pwsh
+        working-directory: desktop
+        run: |
+          .venv-ci/Scripts/python.exe -m unittest discover -s tests -p 'test_*.py'
+          if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
+          .venv-ci/Scripts/python.exe tests/qml_ui_smoke.py
+          if ($LASTEXITCODE -ne 0) { throw 'QML regression failed' }
+          .venv-ci/Scripts/python.exe tests/ocs_ui_smoke.py
+          if ($LASTEXITCODE -ne 0) { throw 'Question results UI failed' }
+          .venv-ci/Scripts/python.exe tests/accounts_ui_smoke.py
+          if ($LASTEXITCODE -ne 0) { throw 'Account UI failed' }
+          .venv-ci/Scripts/python.exe tests/audit_ui_smoke.py
+          if ($LASTEXITCODE -ne 0) { throw 'Audit UI regression failed' }
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          $env:QSG_RHI_BACKEND = 'software'
+          .venv-ci/Scripts/python.exe run.py --smoke-test build/ci-checks/source
+          if ($LASTEXITCODE -ne 0) { throw 'Source worker integration failed' }
+          .venv-ci/Scripts/python.exe tests/performance_smoke.py --tasks 10000 --events 1000 --questions 1000 --rounds 3 --max-round-seconds 20 --max-heartbeat-p95-ms 500 --output build/ci-checks/performance.json
+          if ($LASTEXITCODE -ne 0) { throw 'Performance budget exceeded' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: offline-check-reports
+          path: desktop/build/ci-checks
+          if-no-files-found: ignore
+      - name: Build onedir and verify frozen worker
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        working-directory: desktop
+        run: ./scripts/build.ps1 -OutputDirectory dist/ci/ChaoxingDesktop -SkipGuiSmoke
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          name: windows-build-requires-interactive-acceptance
+          path: desktop/dist/ci/ChaoxingDesktop
+          if-no-files-found: error

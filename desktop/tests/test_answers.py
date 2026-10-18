@@ -72,7 +72,7 @@ class AnswerTests(unittest.TestCase):
         config = dict(defaults()["ai"], endpoint="https://example.test/v1", key="sk-test", model="model-test", vision="true")
         response = Mock()
         response.json.return_value = {"choices": [{"message": {"content": '```json\n{"Answer":["第一项"]}\n```'}}]}
-        with patch("requests.post", return_value=response) as post:
+        with patch("requests.Session.post", return_value=response) as post:
             answer = AIClient(config).query(question('<img src="https://example.test/q.png">'))
         self.assertEqual(answer, "第一项")
         self.assertEqual(post.call_args.args[0], "https://example.test/v1/chat/completions")
@@ -85,7 +85,7 @@ class AnswerTests(unittest.TestCase):
         config = dict(defaults()["ai"], endpoint="https://example.test/v1/chat/completions", key="sk-secret", model="test")
         response = Mock(status_code=401)
         response.raise_for_status.side_effect = requests.HTTPError("sk-secret", response=response)
-        with patch("requests.post", return_value=response) as post:
+        with patch("requests.Session.post", return_value=response) as post:
             with self.assertRaisesRegex(RuntimeError, "HTTP 401") as error:
                 AIClient(config).check_connection()
         self.assertEqual(post.call_count, 1)

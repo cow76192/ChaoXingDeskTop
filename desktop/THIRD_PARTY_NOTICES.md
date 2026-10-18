@@ -1,6 +1,18 @@
 # 来源与许可
 
-桌面版：ChaoxingDesktop 0.2.2，GPL-3.0。完整许可见 LICENSE。
+桌面版：ChaoxingDesktop 0.3.5，GPL-3.0。完整许可见 LICENSE。
+
+0.3.5 精简发行资源：ddddocr 1.6.1 保持原默认模型 `common_old.onnx`，仅删除未使用的 beta / 检测模型；OpenCV 保留图像处理，移除未使用的视频 I/O 插件。Qt 按当前 QML 导入及原生依赖闭包收集，保留开源依赖元数据和许可。移除未调用的姓名查询、无读取方的重做计数与题库展示元数据；未新增运行依赖，未改变媒体结束上报协议。
+
+0.3.2 独立实现本机多账号管理、Windows DPAPI Cookie 加密与迁移、账号切换和会话身份校验；api/cookies.py 适配独立账号存储，api/base.py 在密码登录成功后清理旧会话 Cookie。未新增第三方依赖。
+
+0.3.0 根据 OCSJS 借鉴计划独立实现统一查询结果、逐题诊断、命名空位校验、协作停止与暂停后续调度、受限声明式 JSON 题库、配置格式迁移和离线回归/Windows CI。参考基线仍为 OCSJS 8b25a3f44523a0d4b7373878488056f4aa478cf6；未复制其 TypeScript 或测试数据，未执行导入的 handler，未新增运行依赖。
+
+0.2.11 新增题库答案审核策略（严格、跟随 AI 状态、选项优先）。放宽题干审核时仍核验题型 / 选项，并阻止这类答案进入相似题缓存。未新增依赖。
+
+0.2.10 修正超星验证码重定向判断，复用媒体登录会话、串行识别与有限重试，并区分普通 403 与验证码页面；遇到未恢复的权限 / 会话拦截，章节保留待处理。保留 skreon 的验证码适配来源信息。OCS 言溪 v2 的图片占位符还原与答案匹配参照公开接口行为独立实现，未执行远端脚本或用户提供的 handler。
+
+新增离线验证码识别依赖及模型：ddddocr 1.6.1（MIT，https://github.com/sml2h3/ddddocr）、ONNX Runtime（MIT，https://github.com/microsoft/onnxruntime）、OpenCV Python（Apache 2.0，https://github.com/opencv/opencv-python）、Pillow（MIT-CMU，https://github.com/python-pillow/Pillow）、NumPy（BSD-3-Clause 及其发行包附带的组件许可，https://github.com/numpy/numpy）。准确依赖版本见 requirements-lock.txt，发行包 _internal 中保留相关发行元数据与许可。默认使用 CPU 模型，不要求 GPU / CUDA，也不将验证码图片发送到第三方识别服务。
 
 参考与复用来源：https://github.com/Samueli924/chaoxing
 固定提交：45d2106b16764231c2de2038fb042e71b23d878f
@@ -14,8 +26,29 @@
 
 0.2.2 修复 api/base.py 的会话单例初始化，并直接使用桌面路由核验后的选项编号生成答题表单；api/decode.py 保留选项图片，供视觉模型和人工补全使用。桌面配置统一布尔值大小写，日志逐个过滤各题库 Token。
 
+0.2.5 在真实任务初始化时校验字体映射表 SHA256，修复错误日志占位符，并清理未使用的终端进度、旧答案校验和辅助函数。字体映射表本身未改动；保留 requests 间接使用的 chardet。
+
+2026-10-14 性能与稳定性修复：api/base.py 的视频计时改用单调时钟，限制结束后的完成核验次数；api/live_process.py 的时长提交连续失败时返回失败，交由桌面章节调度重试。
+
+2026-10-17 媒体完成确认修复：对照 OCS 5.0 的 cx.ts 真实播放器结束事件处理，并只读核对超星公开 videojs-ext.min.js 的 ended → isdrag=4 映射，修复正常片尾遗漏结束上报；按任务卡上报间隔和真实时间进行有限确认。未复制或执行远端 JavaScript，未新增依赖。排查及参考链接见 docs/视频结束上报与平台确认排查.md。
+
+0.2.6 根据用户提供的言溪 v2 配置示例修正 api/answer.py 的 POST JSON 请求、响应处理与 Token 切换，并修复 LIKE 关闭重试时完全不发请求的问题。题库接口地址与超时由桌面独立配置传入；api/base.py 增加媒体进度事件回调，api/decode.py 识别音频任务，桌面 QML 展示并发章节的时长进度。新增桌面脱敏日志持久化、目录设置及按应用命名删除日志。
+
+0.2.7 根据真实响应修正 api/answer.py 的未命中、凭据和余额诊断。新增 bank_question.py，参考 OCS 官方 5.0 分支的 answerer-env.ts、answer.wrapper.handler.ts 和 cx.ts 的公开协议约定，独立实现超星题干元信息清理、文本字段默认值、图片 PNG Base64 和编号占位符；未复制其源码。题库路由增加分类统计并支持有明确标签的小写选项。来源：https://github.com/ocsjs/ocsjs/tree/5.0 。
+
+0.2.8 经截图题目真实对比确认题号残留造成部分漏查，修复 api/decode.py 的题目头部提取和 bank_question.py 的元信息清理顺序，保留正文年份与数学表达式。
+
+0.2.9 新增独立实现的 matching.py，使用 Python 标准库 difflib 和 decimal 处理相似度与数值单位，增加原文 / 格式优先、关键内容保护、候选差距、同轮缓存及选项换序定位。api/answer.py 的言溪实现仅在未命中时尝试有限的格式等价题干，并保留返回题干、选项和 AI 标记供核验。未新增第三方依赖。
+
 桌面代码与上游核心一起以 GPL-3.0 提供，源码目录为 desktop；同次交付的源码包包含此目录的源码、构建文件、上游核心与许可，不含用户账号、Cookie 或 API Key。
 
 第三方运行依赖及各自许可保留于打包依赖的 dist-info 和模块文件中。Qt/PySide6 使用其开源许可；依赖版本详见 requirements-lock.txt。本发行包由开源源码构建，未进行代码签名。
 
 PySide6_Essentials 6.12.0 的本地 METADATA 声明许可选择为 `LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only`。本工程采用 GPL-3.0 开源交付；GPL-3.0 文本随 LICENSE 提供。Qt for Python 源码与构建资料来源：https://code.qt.io/cgit/pyside/pyside-setup.git/ ，文档：https://doc.qt.io/qtforpython 。依赖 DLL 单独放置于 `_internal`，可与匹配版本的自行构建依赖一起使用。
+# QML 界面组件
+
+QML 学习工作台使用既有 PySide6 分发的 Qt Quick / Qt Quick Controls（FluentWinUI3、Basic）组件，继续遵循 Qt / PySide6 在本 GPL-3.0 项目中的许可要求。官方控件文档：<https://doc.qt.io/qt-6/qtquickcontrols-fluentwinui3.html>。
+
+Web 调研参考 shadcn/ui、shadcn-admin、Tabler，QML 调研参考 zhuzichu520/FluentUI；本轮没有复制这些第三方模板源码，也没有引入第三方 FluentUI / Pro 模块。布局、页面及状态桥代码在本仓库中实现。
+
+2026-10-15 发布前清理：移除旧 Widgets 界面及其专用组件 / 验收入口，将配置持久化回归测试迁移到 QML 后端。改编的平台适配层移除未使用的签到接口、状态枚举、异常类、通知工厂和字体辅助方法；通知、媒体、验证码和字体映射资源保留。源码包使用明确的源码 / 资源范围，避免收集本机配置及临时文件。

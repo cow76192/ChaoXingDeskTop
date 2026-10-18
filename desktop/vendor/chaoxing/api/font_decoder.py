@@ -74,12 +74,3 @@ class FontDecoder:
             raise FontDecodeError("字体映射未初始化，无法解码")
 
         return cxfont.decrypt(self.__font_map, target_str)
-
-    def set_html_content(self, html_content: str) -> None:
-        """设置新的HTML内容并重新初始化字体映射。
-        
-        Args:
-            html_content: 包含加密字体信息的HTML内容
-        """
-        self.html_content = html_content
-        self.__init_font_map(html_content)

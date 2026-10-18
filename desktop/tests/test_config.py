@@ -1,6 +1,6 @@
 import unittest
 
-from chaoxing_desktop.config import (Redactor, defaults, parse_text, select_courses,
+from chaoxing_desktop.config import (BOOLEAN_KEYS, Redactor, defaults, is_secret, parse_text, select_courses,
                                     serialize, to_payload, validate)
 
 
@@ -32,6 +32,41 @@ class ConfigTests(unittest.TestCase):
                 c[section][key] = value
                 with self.assertRaises(ValueError):
                     validate(c)
+
+    def test_saved_settings_keep_every_boolean_switch(self):
+        for value in ("true", "false"):
+            with self.subTest(value=value):
+                c = defaults()
+                for section, keys in BOOLEAN_KEYS.items():
+                    for key in keys:
+                        c[section][key] = value
+                restored = parse_text(serialize(c, include_secrets=False))
+                validate(restored)
+                for section, keys in BOOLEAN_KEYS.items():
+                    for key in keys:
+                        self.assertEqual(restored[section][key], value)
+
+    def test_recover_old_redacted_cookie_switch_preserves_other_settings(self):
+        c = parse_text("[common]\nuse_cookies = \nspeed = 1.5\njobs = 8\n"
+                       "[ai]\nenabled = true\nmodel = saved-model\n"
+                       "[desktop]\nrandom_fallback = true\n")
+        validate(c)
+        self.assertEqual(c["common"]["use_cookies"], "false")
+        self.assertEqual(c["common"]["speed"], "1.5")
+        self.assertEqual(c["common"]["jobs"], "8")
+        self.assertEqual(c["ai"]["model"], "saved-model")
+        self.assertEqual(c["desktop"]["random_fallback"], "true")
+
+    def test_cookie_switch_is_public_but_cookie_secrets_stay_redacted(self):
+        self.assertFalse(is_secret("use_cookies"))
+        c = defaults()
+        c["common"]["use_cookies"] = "true"
+        c["custom"] = {key: "COOKIE_SECRET" for key in ("cookies", "cookie", "session_cookie")}
+        restored = parse_text(serialize(c, include_secrets=False))
+        self.assertEqual(restored["common"]["use_cookies"], "true")
+        for key in c["custom"]:
+            self.assertTrue(is_secret(key))
+            self.assertEqual(restored["custom"][key], "")
 
     def test_defaults_and_payload(self):
         c = defaults()

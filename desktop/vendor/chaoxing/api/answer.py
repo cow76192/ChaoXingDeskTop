@@ -11,6 +11,7 @@ import threading
 import time
 from typing import Optional
 import requests
+from chaoxing_desktop.http import service_request
 from api.logger import logger
 
 
@@ -22,6 +23,7 @@ class Tiku:
         self.name = ""
         self.api = ""
         self.token = ""
+        self._last_query_request = None
 
     def config_set(self, config):
         self._conf = config
@@ -30,6 +32,54 @@ class Tiku:
         if self._conf is None:
             raise ValueError("题库必须通过桌面设置初始化")
         self._init_tiku()
+
+    def _wait_for_query_request(self):
+        interval = float(self._conf.get('request_interval', 0))
+        now = time.monotonic()
+        if self._last_query_request is not None:
+            from chaoxing_desktop.control import wait
+            wait(self, max(0, self._last_query_request + interval - now))
+        self._last_query_request = time.monotonic()
+
+    def _before_request(self):
+        from chaoxing_desktop.control import checkpoint
+        checkpoint(self)
+        budget = vars(self).get('budget_check')
+        if budget:
+            try:
+                budget()
+            except RuntimeError:
+                self.query_transport_status = 'budget_exhausted'
+                raise
+        self.query_requests = vars(self).get('query_requests', 0) + 1
+
+    def _observe_response(self, response):
+        self.query_http_status = response.status_code
+        self.query_transport_status = ''
+        return response
+
+    def request(self, method, **kwargs):
+        """Retry only transient transport failures; never retry invalid credentials."""
+        from chaoxing_desktop.control import wait
+        retries = int(self._conf.get('request_retries', 0))
+        kwargs.setdefault('timeout', (10, int(self._conf.get('request_timeout', 30))))
+        for attempt in range(retries + 1):
+            self._wait_for_query_request()
+            self._before_request()
+            self.query_retries = vars(self).get('query_retries', 0) + (1 if attempt else 0)
+            response = None
+            try:
+                response = self._observe_response(service_request(self, method, self.api, **kwargs))
+                if response.status_code != 429 and response.status_code < 500:
+                    return response
+                if attempt == retries:
+                    return response
+            except requests.RequestException as exc:
+                self.query_transport_status = 'timeout' if isinstance(exc, requests.Timeout) else 'network_error'
+                if attempt == retries:
+                    raise RuntimeError(f'{self.name}连接失败或超时，请检查地址和网络') from None
+            from chaoxing_desktop.query_result import retry_delay
+            wait(self, retry_delay(response, attempt))
 
     @staticmethod
     def get_tiku_from_config(config, config_path=None):
@@ -51,46 +101,113 @@ class TikuYanxi(Tiku):
         self._token = None
         self._token_index = 0  # token队列计数器
         self._times = 100  # 查询次数剩余, 初始化为100, 查询后校对修正
+        self.last_query_status = ''
+        self.last_query_reason = ''
+        self._image_encoder = None
 
     def _query(self, q_info: dict):
-        res = requests.get(
-            self.api,
-            params={
-                'question': q_info['title'],
-                'token': self._token,
-                # 'type':q_info['type'], #修复478题目类型与答案类型不符（不想写后处理了）
-                # 没用，就算有type和options，言溪题库还是可能返回类型不符，问了客服，type仅用于收集
-            },
-            timeout=(10, 30)
-        )
-        if res.status_code == 200:
-            res_json = res.json()
-            if not res_json['code']:
-                # 如果是因为TOKEN次数到期, 则更换token
-                if self._times == 0 or '次数不足' in res_json['data']['answer']:
-                    logger.info(f'TOKEN查询次数不足, 将会更换并重新搜题')
-                    self._token_index += 1
-                    self.load_token()
-                    # 重新查询
-                    return self._query(q_info)
-                logger.error(
-                    f'{self.name}查询失败:\n\t剩余查询数{res_json["data"].get("times", f"{self._times}(仅参考)")}:\n\t消息:{res_json["message"]}')
+        from chaoxing_desktop.bank_question import query_title_variants
+        result = self._query_once(q_info)
+        if result or self.last_query_status != 'miss' or str(self._conf.get('yanxi_query_variants', 'false')).lower() != 'true':
+            return result
+        for title in query_title_variants(self.last_query_title, int(self._conf.get('yanxi_variant_limit', 2))):
+            logger.info('言溪未命中，尝试格式等价题干（保留数字与题目含义）')
+            result = self._query_once(dict(q_info, title=title))
+            if result or self.last_query_status != 'miss':
+                return result
+        return None
+
+    def _query_once(self, q_info: dict):
+        from chaoxing_desktop.bank_question import ImageEncoder, build_yanxi_environment, restore_image_placeholders
+        self.last_query_status, self.last_query_reason = 'error', ''
+        self.last_result_question, self.last_result_options = '', None
+        self.last_result_ai = False
+        self.last_result_tags = []
+        if self._image_encoder is None:
+            self._image_encoder = ImageEncoder(int(self._conf.get('request_timeout', 30)))
+        self._image_encoder.control = vars(self).get('control')
+        env, image_urls = build_yanxi_environment(q_info, self._image_encoder, logger.warning)
+        self.last_query_title = env['title']
+        # v2 follows the supplied OCS wrapper: code=0 is a diagnostic result,
+        # while nonzero returns data.question + data.answer.
+        while self._token_index < len(self._tokens):
+            res = self.request('post', headers={'Content-Type': 'application/json'}, json=dict(env, token=self._token, v='2'))
+            if res.status_code != 200:
+                self.last_query_reason = f'HTTP {res.status_code}'
+                logger.warning(f'{self.name}请求错误：{self.last_query_reason}')
                 return None
-            self._times = res_json["data"].get("times", self._times)
-            return res_json['data']['answer'].strip()
-        else:
-            logger.error(f'{self.name}查询失败:\n{res.text}')
+            try:
+                body = res.json()
+                if not isinstance(body, dict) or 'code' not in body:
+                    raise ValueError
+                code = int(body['code'])
+                data = body.get('data')
+                if not isinstance(data, dict):
+                    if code == 0 and body.get('message'):
+                        data = {}
+                    else:
+                        raise ValueError
+            except (ValueError, TypeError, AttributeError):
+                self.query_transport_status = 'protocol_error'
+                logger.warning(f'{self.name}响应格式错误：需要 JSON code 和 data')
+                return None
+            answer = data.get('answer')
+            self.last_result_tags = data.get('tags') if isinstance(data.get('tags'), list) else []
+            if code == 0:
+                from chaoxing_desktop.answers import plain_text
+                detail = plain_text(answer).strip() if isinstance(answer, str) else ''
+                message = str(body.get('message') or '').strip()
+                tags = data.get('tags')
+                tag_text = '，'.join(str(tag.get('text') or '') for tag in tags if isinstance(tag, dict)) if isinstance(tags, list) else ''
+                reason = detail or tag_text or message or '服务没有提供失败原因'
+                # The live v2 API uses the generic message "请求失败" even for
+                # ordinary misses. data.answer/tags are the actual diagnosis.
+                if message and message not in ('请求失败', '查询失败') and message not in reason:
+                    reason += '；' + message
+                reason = re.sub(r'\s+', ' ', reason)[:600]
+                self.last_query_reason = reason
+                if any(word in reason for word in ('次数不足', '余额不足', '次数用完')):
+                    self._token_index += 1
+                    if self._token_index < len(self._tokens):
+                        self.load_token()
+                        logger.info('言溪查询次数不足，切换下一个 Token')
+                        continue
+                preview = env['title'][:80]
+                if any(word in reason + tag_text for word in ('题库没有该题', '没有该题的答案', '未找到答案', '搜不到答案', '未收录', '未命中')):
+                    self.last_query_status = 'miss'
+                    logger.info(f'{self.name}未命中：{reason}；题干：{preview}')
+                else:
+                    logger.warning(f'{self.name}请求错误（HTTP 200，code=0）：{reason}；题干：{preview}')
+                return None
+            self._times = data.get('times', self._times)
+            answer = restore_image_placeholders(answer, image_urls)
+            if isinstance(answer, list) and all(isinstance(item, str) for item in answer):
+                answer = json.dumps(answer, ensure_ascii=False) if q_info.get('type') == 'completion' else '\n'.join(answer)
+            answer = answer.strip() if isinstance(answer, str) else ''
+            if answer:
+                self.last_query_status = 'hit'
+                self.last_result_question = restore_image_placeholders(data.get('question'), image_urls) if isinstance(data.get('question'), str) else ''
+                self.last_result_options = restore_image_placeholders(data.get('options'), image_urls)
+                self.last_result_ai = str(data.get('ai', False)).lower() in ('true', '1')
+                return answer
+            self.last_query_status = 'miss'
+            self.last_query_reason = '服务未返回可用答案'
+            logger.info(f'{self.name}未命中：{self.last_query_reason}；题干：{env["title"][:80]}')
+            return None
+        self.last_query_reason = '所有 Token 查询次数均已用完'
+        logger.warning(f'{self.name}请求错误：{self.last_query_reason}')
         return None
 
     def load_token(self):
-        token_list = self._conf['tokens'].split(',')
-        if self._token_index == len(token_list):
+        if self._token_index >= len(self._tokens):
             # TOKEN 用完
             logger.error('TOKEN用完, 请自行更换再重启脚本')
             raise PermissionError(f'{self.name} TOKEN 已用完, 请更换')
-        self._token = token_list[self._token_index]
+        self._token = self._tokens[self._token_index]
 
     def _init_tiku(self):
+        self.api = self._conf.get('request_endpoint', self.api).strip()
+        self._tokens = [token.strip() for token in self._conf.get('tokens', '').split(',') if token.strip()]
         self.load_token()
 
 
@@ -117,7 +234,8 @@ class TikuGo(Tiku):
             wait_time = max(0.0, self._last_request_time + self._min_interval - now)
             self._last_request_time = now + wait_time
         if wait_time > 0:
-            time.sleep(wait_time)
+            from chaoxing_desktop.control import wait
+            wait(self, wait_time)
 
     def _mark_request_finished(self) -> None:
         with self._request_lock:
@@ -126,16 +244,19 @@ class TikuGo(Tiku):
     def _request_question(self, question: str, attempt: int) -> Optional[requests.Response]:
         try:
             self._sleep_for_next_request()
-            res = requests.post(
-                self.api,
+            self._before_request()
+            res = service_request(
+                self, 'post', self.api,
                 data={'question': question},
                 headers=self._headers,
                 verify=True,
-                timeout=15
+                timeout=int(self._conf.get('request_timeout', 15))
             )
+            self._observe_response(res)
             self._mark_request_finished()
             return res
         except requests.exceptions.RequestException as e:
+            self.query_transport_status = 'timeout' if isinstance(e, requests.Timeout) else 'network_error'
             logger.error(f'{self.name}查询异常 ({attempt}/{self._retry_times}): {e}')
             self._mark_request_finished()
             return None
@@ -148,9 +269,13 @@ class TikuGo(Tiku):
         try:
             res_json = res.json()
         except ValueError:
+            self.query_transport_status = 'protocol_error'
             logger.error(f'{self.name}查询失败: 返回内容不是有效JSON, 响应: {res.text}')
             return None
 
+        if not isinstance(res_json, dict) or 'code' not in res_json:
+            self.query_transport_status = 'protocol_error'
+            return None
         try:
             code = int(str(res_json.get('code', '')).strip())
         except ValueError:
@@ -173,7 +298,9 @@ class TikuGo(Tiku):
         else:
             sleep_seconds = self._retry_backoff * attempt
         logger.warning(f'{self.name}{reason}，{sleep_seconds:.1f}s 后重试 ({attempt}/{self._retry_times})')
-        time.sleep(sleep_seconds)
+        from chaoxing_desktop.control import wait
+        self.query_retries = vars(self).get('query_retries', 0) + 1
+        wait(self, sleep_seconds)
 
     @staticmethod
     def _is_placeholder_answer(answer: str, msg: str) -> bool:
@@ -197,6 +324,8 @@ class TikuGo(Tiku):
             answer = self._query_once(query_title)
             if answer:
                 return answer
+            if vars(self).get('query_http_status') in (401, 403, 429) or vars(self).get('query_transport_status'):
+                break
         return None
 
     def _query_once(self, question: str) -> Optional[str]:
@@ -218,6 +347,9 @@ class TikuGo(Tiku):
             is_throttled = parsed['is_throttled']
 
             if code != 1:
+                self.last_query_reason = msg
+                from chaoxing_desktop.query_result import diagnostic_status
+                self.query_transport_status = diagnostic_status(msg) if is_throttled or diagnostic_status(msg) != 'service_error' else ''
                 if is_throttled and attempt < self._retry_times:
                     self._sleep_retry(attempt, '触发流控')
                     continue
@@ -239,6 +371,7 @@ class TikuGo(Tiku):
         return None
 
     def _init_tiku(self):
+        self.api = self._conf.get('request_endpoint', self.api).strip()
         self._headers['Authorization'] = self._conf.get('go_authorization', self._headers['Authorization'])
         try:
             min_interval = float(self._conf.get('go_min_interval', self._min_interval))
@@ -271,11 +404,8 @@ class TikuLike(Tiku):
         """初始化LIKE知识库实例."""
         super().__init__(config_path)
         self.name = 'LIKE知识库'
-        self.ver = '2.0.0'  # 对应官网API版本
         self.query_api = 'https://app.datam.site/api/v1/query'
-        self.models_api = 'https://app.datam.site/api/v1/query/models'
         self.balance_api = 'https://app.datam.site/api/v1/balance'
-        self.homepage = 'https://www.datam.site'
         self._model = None
         self._timeout = 300
         self._retry = True
@@ -305,12 +435,13 @@ class TikuLike(Tiku):
 
         # 检查该token是否有余额
         if self._balance.get(token, 0) <= 0:
-            logger.error(f'{self.name}当前Token查询次数不足: ...{token[-5:]}')
+            logger.error(f'{self.name}当前Token查询次数不足: [已隐藏]')
             # 尝试选择其他有余额的token
             available_tokens = [t for t in self._tokens if self._balance.get(t, 0) > 0]
             if available_tokens:
                 token = random.choice(available_tokens)
             else:
+                self.last_query_status, self.last_query_reason = 'error', '所有 Token 次数不足'
                 logger.error(f'{self.name}所有Token查询次数都不足')
                 return None
 
@@ -318,15 +449,20 @@ class TikuLike(Tiku):
         try_times = 0
 
         # 尝试查询，直到成功或达到重试次数
-        while not ans and self._retry and try_times < self._retry_times:
+        attempts = 1 + (self._retry_times if self._retry else 0)
+        while not ans and try_times < attempts:
             ans = self._query_single(token, question)
             try_times += 1
+            if not ans and (vars(self).get('query_http_status') in (400, 401, 403) or vars(self).get('query_transport_status') in ('protocol_error', 'auth_error', 'quota_error', 'budget_exhausted')):
+                break
+            if try_times > 1:
+                self.query_retries = vars(self).get('query_retries', 0) + 1
             if ans:  # 如果查询成功，减少余额
                 self._balance[token] -= 1
-                logger.info(f'使用Token ...{token[-5:]} 查询成功，剩余次数: {self._balance[token]}')
+                logger.info(f'使用Token [已隐藏] 查询成功，剩余次数: {self._balance[token]}')
                 break
-            elif try_times < self._retry_times:
-                logger.warning(f'使用Token ...{token[-5:]} 查询失败，进行第 {try_times + 1} 次重试...')
+            elif try_times < attempts:
+                logger.warning(f'使用Token [已隐藏] 查询失败，进行第 {try_times + 1} 次重试...')
 
         # 10次查询后更新余额
         self._count = (self._count + 1) % 10
@@ -369,17 +505,21 @@ class TikuLike(Tiku):
 
         # 发送API请求
         try:
-            res = requests.post(
-                self.query_api,
+            self._wait_for_query_request()
+            self._before_request()
+            res = service_request(
+                self, 'post', self.query_api,
                 json=request_data,
                 headers=temp_headers,
                 verify=True,
                 timeout=self._timeout  # 添加超时设置
             )
         except requests.exceptions.Timeout:
-            logger.error(f'{self.name}查询超时: 请求超过300秒')
+            self.query_transport_status = 'timeout'
+            logger.error(f'{self.name}查询超时: 请求超过{self._timeout}秒')
             return None
         except requests.exceptions.ConnectionError:
+            self.query_transport_status = 'network_error'
             logger.error(f'{self.name}网络连接错误: 无法连接到API服务器')
             return None
         except requests.exceptions.RequestException as e:
@@ -389,6 +529,7 @@ class TikuLike(Tiku):
             logger.error(f'{self.name}查询发生未知错误: \n{e}')
             return None
 
+        self._observe_response(res)
         # 处理HTTP响应
         if res.status_code == 200:
             return self._parse_response(res)
@@ -420,34 +561,49 @@ class TikuLike(Tiku):
         try:
             res_json = response.json()
         except json.JSONDecodeError:
+            self.query_transport_status = 'protocol_error'
             logger.error(f'{self.name}响应解析失败: 响应不是有效的JSON格式')
             return None
         except Exception as e:
+            self.query_transport_status = 'protocol_error'
             logger.error(f'{self.name}响应解析异常: {e}')
             return None
 
+        if not isinstance(res_json, dict):
+            self.query_transport_status = 'protocol_error'
+            return None
         # 记录响应消息
         msg = res_json.get('message', '')
         if msg:
             logger.info(f'{self.name}响应消息: {msg}')
+            from chaoxing_desktop.query_result import diagnostic_status
+            status = diagnostic_status(msg)
+            if status != 'service_error':
+                self.query_transport_status = status
+                self.last_query_reason = str(msg)
+                return None
 
         results = res_json.get('results', {})
         if not results or not isinstance(results, dict):
+            self.query_transport_status = 'protocol_error'
             logger.error(f'{self.name}查询结果格式错误: API返回结果中results字段格式不正确')
             return None
 
         output = results.get('output', None)
         if output is None or not isinstance(output, dict):
+            self.query_transport_status = 'protocol_error'
             logger.error(f'{self.name}查询结果中output字段格式错误或不存在')
             return None
 
         q_type = output.get('questionType', None)
         if q_type is None:
+            self.query_transport_status = 'protocol_error'
             logger.error(f'{self.name}查询结果中questionType字段不存在')
             return None
 
         answer = output.get('answer', None)
         if answer is None:
+            self.query_transport_status = 'protocol_error'
             logger.error(f'{self.name}查询结果中answer字段不存在')
             return None
 
@@ -490,7 +646,7 @@ class TikuLike(Tiku):
                     # 过滤掉None和空字符串
                     valid_blanks = [blank for blank in blanks if blank is not None and str(blank).strip()]
                     if valid_blanks:
-                        return "\n".join(str(blank) for blank in valid_blanks)
+                        return json.dumps(blanks, ensure_ascii=False) if all(isinstance(blank, str) for blank in blanks) else None
                     else:
                         logger.error(f'{self.name}FILL_IN_BLANK类型题目没有有效的填空内容')
                 else:
@@ -520,8 +676,8 @@ class TikuLike(Tiku):
         temp_headers = self._headers.copy()
         temp_headers['Authorization'] = f'Bearer {token}'
         try:
-            res = requests.get(
-                self.balance_api,
+            res = service_request(
+                self, 'get', self.balance_api,
                 headers=temp_headers,
                 verify=True,
                 timeout=self._timeout
@@ -553,7 +709,7 @@ class TikuLike(Tiku):
             balance = self.get_api_balance(token)
             self._balance[token] = balance
             logger.info(
-                f"当前LIKE知识库Token: ...{token[-5:]} 的剩余查询次数为: {balance} (仅供参考, 实际次数以查询结果为准)")
+                f"当前LIKE知识库Token: [已隐藏] 的剩余查询次数为: {balance} (仅供参考, 实际次数以查询结果为准)")
 
     def load_tokens(self) -> None:
         tokens_str = self._conf.get('tokens')
@@ -570,6 +726,8 @@ class TikuLike(Tiku):
             logger.warning(f'{self.name}未加载任何有效的Token')
 
     def load_config(self) -> None:
+        self.query_api = self._conf.get('request_endpoint', self.query_api).strip()
+        self._timeout = int(self._conf.get('request_timeout', 300))
         # 从配置中获取参数，提供默认值
         self._search = str(self._conf.get('likeapi_search', 'false')).lower() == 'true'
         self._model = self._conf.get('likeapi_model', None)
@@ -609,31 +767,32 @@ class TikuAdapter(Tiku):
             type = 4
 
         options = q_info['options']
-        res = requests.post(
-            self.api,
+        res = self.request('post',
             json={
                 'question': q_info['title'],
                 'options': [sub(r'^[A-Za-z]\.?、?\s?', '', option) for option in options.split('\n')],
                 'type': type
             },
-            timeout=(10, 30)
         )
         if res.status_code == 200:
             res_json = res.json()
-            # if bool(res_json['plat']):
             # plat无论搜没搜到答案都返回0
             # 这个参数是tikuadapter用来设定自定义的平台类型
             if not len(res_json['answer']['bestAnswer']):
+                from chaoxing_desktop.query_result import diagnostic_status
+                diagnosis = diagnostic_status(res_json.get('message') or res_json.get('msg') or '')
+                if diagnosis != 'service_error':
+                    self.query_transport_status = diagnosis
                 logger.error("查询失败, 返回：" + res.text)
                 return None
             sep = "\n"
-            return sep.join(res_json['answer']['bestAnswer']).strip()
-        # else:
-        #   logger.error(f'{self.name}查询失败:\n{res.text}')
+            values = res_json['answer']['bestAnswer']
+            if not isinstance(values, list) or not all(isinstance(value, str) for value in values):
+                raise ValueError('Adapter 答案格式错误')
+            return json.dumps(values, ensure_ascii=False) if q_info.get('type') == 'completion' else sep.join(values).strip()
         return None
 
     def _init_tiku(self):
-        # self.load_token()
         self.api = self._conf['url']
 
 

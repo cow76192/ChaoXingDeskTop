@@ -14,11 +14,11 @@ while pending:
     if req.marker and not req.marker.evaluate({"extra": ""}):
         continue
     name = canonicalize_name(req.name)
-    if name in resolved:
-        continue
     dist = distribution(req.name)
     if req.specifier and dist.version not in req.specifier:
         raise RuntimeError(f"Installed {req.name} does not satisfy {req.specifier}")
+    if name in resolved:
+        continue
     resolved[name] = dist.version
     pending.extend(Requirement(item) for item in dist.requires or [])
 (root / "requirements-lock.txt").write_text("\n".join(f"{name}=={version}" for name, version in sorted(resolved.items())) + "\n", encoding="utf-8")

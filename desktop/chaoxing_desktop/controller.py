@@ -1,11 +1,14 @@
 import json
 from pathlib import Path
 import sys
+import uuid
 
-from PySide6.QtCore import QObject, QProcess, Signal
+from PySide6.QtCore import QObject, QProcess, Signal, QTimer
 
 
 class Controller(QObject):
+    MAX_FRAME_BYTES = 16 * 1024 * 1024
+    EVENTS_PER_TICK = 128
     event = Signal(dict)
     finished = Signal(int)
     busy_changed = Signal(bool)
@@ -19,16 +22,34 @@ class Controller(QObject):
         self.process.finished.connect(self.on_finished)
         self.process.errorOccurred.connect(self.on_error)
         self.process.started.connect(self.on_started)
-        self.buffer = b""
+        self.buffer = bytearray()
+        self._drain_timer = QTimer(self)
+        self._drain_timer.setSingleShot(True)
+        self._drain_timer.timeout.connect(self.read_output)
+        self._exit_code = None
+        self._protocol_failed = False
         self.payload = {}
         self.active = False
         self.stopping = False
+        self.paused = False
+        self.run_id = ''
+        self.request_id = ''
+        self._kill_timer = QTimer(self)
+        self._kill_timer.setSingleShot(True)
+        self._kill_timer.timeout.connect(self.process.kill)
 
     def start(self, payload):
         if self.active:
             raise RuntimeError("已有后台任务正在运行。")
-        self.payload = payload
-        self.buffer = b""
+        self.run_id = uuid.uuid4().hex
+        self.payload = dict(payload, run_id=self.run_id)
+        self.paused = False
+        self.request_id = ''
+        self._kill_timer.stop()
+        self.buffer.clear()
+        self._drain_timer.stop()
+        self._exit_code = None
+        self._protocol_failed = False
         self.stopping = False
         self.active = True
         self.busy_changed.emit(True)
@@ -46,14 +67,84 @@ class Controller(QObject):
         self.payload = {}  # do not retain secrets after transmission
 
     def read_output(self):
-        self.buffer += bytes(self.process.readAllStandardOutput())
-        while b"\n" in self.buffer:
-            line, self.buffer = self.buffer.split(b"\n", 1)
+        # Read and parse in bounded batches so the GUI can render and stop a
+        # noisy worker. Splitting the whole remaining byte string per line used
+        # to copy the same large batch repeatedly.
+        if self._protocol_failed:
+            self.process.readAllStandardOutput()
+            if self._exit_code is not None:
+                self._finish()
+            return
+        self.buffer.extend(bytes(self.process.read(64 * 1024)))
+        consumed = 0
+        for _ in range(self.EVENTS_PER_TICK):
+            end = self.buffer.find(b"\n", consumed)
+            if end < 0:
+                break
+            if end - consumed > self.MAX_FRAME_BYTES:
+                self._fail_protocol()
+                return
+            line = self.buffer[consumed:end]
+            consumed = end + 1
             if line.strip():
                 try:
-                    self.event.emit(json.loads(line.decode("utf-8")))
-                except (ValueError, UnicodeDecodeError):
-                    self.event.emit({"type": "error", "message": "后台事件格式错误，请停止并重试。"})
+                    event = json.loads(line.decode("utf-8"))
+                    if not self._valid_event(event):
+                        raise ValueError("invalid worker event")
+                except (ValueError, UnicodeDecodeError, RecursionError):
+                    self._fail_protocol()
+                    return
+                if event.get('run_id', self.run_id) == self.run_id:
+                    if event.get('type') == 'input':
+                        self.request_id = event.get('request_id', '')
+                    self.event.emit(event)
+        if consumed:
+            del self.buffer[:consumed]
+        if len(self.buffer) > self.MAX_FRAME_BYTES:
+            self._fail_protocol()
+            return
+        if b"\n" in self.buffer or self.process.bytesAvailable():
+            self._drain_timer.start(0)
+        elif self._exit_code is not None:
+            if self.buffer.strip():
+                self._fail_protocol()
+            else:
+                self._finish()
+
+    @staticmethod
+    def _valid_event(event):
+        if not isinstance(event, dict) or not isinstance(event.get("type"), str):
+            return False
+        kind = event["type"]
+        if kind in ("courses", "tasks"):
+            items = event.get(kind)
+            return isinstance(items, list) and all(
+                isinstance(item, dict) and isinstance(item.get("title"), str) and (
+                    all(isinstance(item.get(key), (str, int)) for key in ("courseId", "clazzId")) if kind == "courses" else
+                    all(isinstance(item.get(key), str) for key in ("id", "course")))
+                for item in items)
+        if kind == 'question_result':
+            from .question_model import valid_record
+            return valid_record(event.get('record'))
+        if kind == 'control':
+            return type(event.get('paused')) is bool
+        if kind == "task":
+            return isinstance(event.get("id"), str) and isinstance(event.get("status"), str)
+        if kind == "done":
+            return all(type(event.get(key)) is int and event[key] >= 0 for key in ("success", "pending", "failed", "skipped"))
+        if kind == "input":
+            return isinstance(event.get("question", {}), dict) and isinstance(event.get("choices", []), list) and all(
+                isinstance(choice, dict) and isinstance(choice.get("label"), str) and isinstance(choice.get("value"), str)
+                for choice in event.get("choices", []))
+        return True
+
+    def _fail_protocol(self):
+        self._protocol_failed = True
+        self.buffer.clear()
+        self.event.emit({"type": "error", "message": "后台事件格式错误或数据过大，任务已停止，请重试。"})
+        self.process.kill()
+        if self._exit_code is not None:
+            self._finish()
 
     def read_errors(self):
         # Raw stderr can contain unredacted traces. Report without displaying it.
@@ -63,15 +154,30 @@ class Controller(QObject):
 
     def reply(self, answer="", cancel=False):
         if self.active and not self.stopping:
-            self.process.write((json.dumps({"answer": answer, "cancel": cancel}, ensure_ascii=False) + "\n").encode("utf-8"))
+            self.process.write((json.dumps({"command": "cancel" if cancel else "reply", "request_id": self.request_id, "answer": answer, "cancel": cancel}, ensure_ascii=False) + "\n").encode("utf-8"))
+
+    def pause(self):
+        if self.active and not self.stopping:
+            self.paused = not self.paused
+            self.process.write((json.dumps({'command': 'pause' if self.paused else 'resume'}) + '\n').encode('utf-8'))
 
     def stop(self):
-        if self.active:
+        if self.active and not self.stopping:
             self.stopping = True
-            self.process.kill()
+            self.process.write(b'{"command":"cancel"}\n')
+            self._kill_timer.start(3000)
 
     def on_finished(self, code, _status):
+        # Deliver queued done/error events before announcing process exit.
+        self._exit_code = code
         self.read_output()
+
+    def _finish(self):
+        self._kill_timer.stop()
+        self.paused = False
+        code, self._exit_code = self._exit_code, None
+        self._drain_timer.stop()
+        self.buffer.clear()
         self.active = False
         self.payload = {}
         self.busy_changed.emit(False)

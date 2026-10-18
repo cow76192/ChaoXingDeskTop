@@ -3,14 +3,17 @@ from enum import Enum
 import threading
 
 from api.base import Account, Chaoxing, StudyResult
+from api.logger import logger
 from api.notification import Notification
 from .answers import build_answers
+from .control import checkpoint, control_of
 
 
 class ChapterResult(Enum):
     SUCCESS = 0
     ERROR = 1
     NOT_OPEN = 2
+    PENDING = 3
 
 
 def create_client(config, channel, courses_only=False):
@@ -19,15 +22,29 @@ def create_client(config, channel, courses_only=False):
     answers = DummyTiku() if courses_only else build_answers(config, channel)
     client = Chaoxing(account=Account(common["username"], common["password"]), tiku=answers,
                       query_delay=config["tiku"]["delay"], work_max_retries=common["work_max_retries"],
-                      work_redo_enabled=common["work_redo_enabled"], desktop_mode=True)
+                      work_redo_enabled=common["work_redo_enabled"])
+    client.control = control_of(channel)
+    from api.base import SessionManager
+    SessionManager.get_session().control = client.control
     client.desktop_work_lock = threading.Lock()
+    client.desktop_media_context = threading.local()
+    def media_progress(**values):
+        task_id = getattr(client.desktop_media_context, 'task_id', None)
+        if task_id:
+            channel.send('media', id=task_id, **values)
+    client.desktop_media_progress = media_progress
     return client
 
 
 def process_job(client, course, job, info, speed):
+    checkpoint(client)
     kind = job["type"]
+    if kind == 'audio':
+        return client.study_video(course, job, info, _speed=speed, _type='Audio')
     if kind == "video":
         result = client.study_video(course, job, info, _speed=speed, _type="Video")
+        if result in (StudyResult.FORBIDDEN, StudyResult.VERIFICATION_REQUIRED, StudyResult.TIMEOUT):
+            return result
         return client.study_video(course, job, info, _speed=speed, _type="Audio") if result.is_failure() else result
     if kind == "document":
         return client.study_document(course, job)
@@ -36,6 +53,9 @@ def process_job(client, course, job, info, speed):
     if kind == "workid":
         # Feedback and manual dialogs belong to one exercise at a time.
         with client.desktop_work_lock:
+            if hasattr(client.tiku, 'set_context'):
+                client.tiku.set_context(task_id=getattr(client.desktop_media_context, 'task_id', '') or '',
+                                        work_id=str(job.get('jobid', '')))
             client.tiku.set_work_feedback(None)
             return client.study_work(course, job, info)
     if kind == "live":
@@ -43,20 +63,55 @@ def process_job(client, course, job, info, speed):
         from api.live_process import LiveProcessor
         live = Live(attachment=job, defaults={"userid": client.get_uid(), "clazzId": course["clazzId"],
                                              "knowledgeid": info.get("knowledgeid")}, course_id=course["courseId"])
+        live.control = control_of(client)
         return StudyResult.SUCCESS if LiveProcessor.run_live(live, speed) else StudyResult.ERROR
     return StudyResult.ERROR
 
 
-def process_chapter(client, course, point, speed):
+def process_chapter(client, course, point, speed, task_id=None):
+    context = getattr(client, 'desktop_media_context', None)
+    if context is not None:
+        context.task_id = task_id
+    try:
+        return _process_chapter(client, course, point, speed)
+    finally:
+        if context is not None:
+            context.task_id = None
+
+
+def _process_chapter(client, course, point, speed):
     if point.get("has_finished"):
         return ChapterResult.SUCCESS
     jobs, info = client.get_job_list(course, point)
     if info.get("notOpen"):
         return ChapterResult.NOT_OPEN
-    for job in jobs:
-        if process_job(client, course, job, info, speed).is_failure():
-            return ChapterResult.ERROR
-    return ChapterResult.SUCCESS
+    title = point.get('title', point.get('id', ''))
+    logger.info('章节「{}」检测到 {} 个待处理任务点。', title, len(jobs))
+    # A chapter may contain several independent media. One unconfirmed job
+    # must not hide or prevent the remaining jobs from being processed.
+    outcome = ChapterResult.SUCCESS
+    for index, job in enumerate(jobs):
+        name = job.get('name') or job.get('title') or job.get('jobid') or job['type']
+        logger.info('章节「{}」任务点 {}/{}：{}', title, index + 1, len(jobs), name)
+        try:
+            result = process_job(client, course, job, info, speed)
+        except Exception as exc:
+            # Cancellation and failed session resumption derive from
+            # BaseException and must still interrupt the whole run.
+            logger.warning('任务点「{}」处理异常：{}: {}', name, type(exc).__name__, exc)
+            result = StudyResult.ERROR
+        if result == StudyResult.VERIFICATION_REQUIRED:
+            logger.warning('会话需要人工验证，章节「{}」保留待完成；还有 {} 个任务点未执行。',
+                           title, len(jobs) - index - 1)
+            return ChapterResult.PENDING
+        if result in (StudyResult.FORBIDDEN, StudyResult.TIMEOUT):
+            logger.warning('任务点「{}」未获平台确认（{}），继续处理本章其他任务点。', name, result.name)
+            outcome = ChapterResult.PENDING
+        elif result.is_failure():
+            logger.warning('任务点「{}」处理失败，继续处理本章其他任务点。', name)
+            if outcome != ChapterResult.PENDING:
+                outcome = ChapterResult.ERROR
+    return outcome
 
 
 def increase_learning_count_for_course(client, course, config):

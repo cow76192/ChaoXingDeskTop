@@ -6,7 +6,7 @@ import re
 import threading
 import time
 from difflib import SequenceMatcher
-from enum import Enum, IntEnum
+from enum import Enum
 from hashlib import md5
 from typing import Optional, Literal
 from typing_extensions import Self
@@ -17,6 +17,8 @@ from requests import RequestException
 from requests.adapters import HTTPAdapter
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception
 
+from chaoxing_desktop.control import checkpoint, wait as controlled_wait
+from api.responses import checked_page, PlatformResponseError
 from api.answer import Tiku
 from api.answer_check import cut
 from api.cipher import AESCipher
@@ -50,11 +52,12 @@ class SessionManager:
 
     def _initialize_session(self):
         self._session = requests.Session()
-        self._session.mount("https://", HTTPAdapter(max_retries=10))
-        self._session.mount("http://", HTTPAdapter(max_retries=10))
-        self._session.request = functools.partial(self._session.request, timeout=5)
-        # For debug purposes
-        # self._session.verify=False
+        # Chapter retries already own recovery; avoid multiplying them by ten.
+        self._session.mount("https://", HTTPAdapter(max_retries=1))
+        self._session.mount("http://", HTTPAdapter(max_retries=1))
+        from chaoxing_desktop.http import platform_request
+        self._session.request = functools.partial(platform_request, self._session, self._session.request)
+        self._session.max_redirects = 5
         self._session.headers.clear()
         self._session.headers.update(gc.HEADERS)
         self._session.cookies.update(use_cookies())
@@ -92,11 +95,6 @@ class SessionManager:
 
 
 class Account:
-    username = None
-    password = None
-    last_login = None
-    isSuccess = None
-
     def __init__(self, _username, _password):
         self.username = _username
         self.password = _password
@@ -124,27 +122,10 @@ class StudyResult(Enum):
     FORBIDDEN = 1  # 403
     ERROR = 2
     TIMEOUT = 3
-
-    def is_success(self):
-        return self == StudyResult.SUCCESS
+    VERIFICATION_REQUIRED = 4
 
     def is_failure(self):
         return self != StudyResult.SUCCESS
-
-
-class SignType(IntEnum):
-    NORMAL = 0
-    GESTURE = 3
-    LOCATION = 4
-
-
-class ActivityStatus(IntEnum):
-    ACTIVE = 1
-    INACTIVE = 2
-
-
-class ActivityType(IntEnum):
-    SIGNIN = 2
 
 
 def multi_cut(answer: str, origin_html_content="", logger=logger):
@@ -332,27 +313,29 @@ class Chaoxing:
         self.cipher = AESCipher()
         self.tiku = tiku
         self.kwargs = kwargs
-        self.rollback_times = 0
         self.rate_limiter = RateLimiter(0.5)  # 其他接口速率限制比较松
         self.video_log_limiter = RateLimiter(2)  # 上报进度极其容易卡验证码，限制2s一次
+        from api.captcha import CaptchaRecovery
+        self._captcha_recovery = CaptchaRecovery()
 
     def login(self, login_with_cookies=False):
+        self._course_snapshot = None
         if login_with_cookies:
             logger.info("Logging in with cookies")
             SessionManager.update_cookies()
-            logger.debug(f"Logged in with cookies: {SessionManager.get_instance()._session.cookies}")
-            if not self._validate_cookie_session():
+            try:
+                valid = self._validate_cookie_session()
+            except PlatformResponseError as exc:
+                # Only explicit authentication failure permits password fallback.
+                if exc.kind != 'auth_error':
+                    return {"status": False, "msg": str(exc), "kind": exc.kind}
+                valid = False
+            if not valid:
                 logger.warning("Cookie 登录校验失败，尝试使用账号密码重新登录")
                 if self.account and self.account.username and self.account.password:
                     return self.login(login_with_cookies=False)
                 return {"status": False, "msg": "cookies 已失效，请更新 cookies 或提供账号密码"}
             logger.info("登录成功...")
-            try:
-                realname = self.get_name()
-                if realname:
-                    logger.info(f"当前登录用户: {realname}")
-            except Exception as e:
-                logger.debug(f"获取当前登录用户名失败: {e}")
             return {"status": True, "msg": "登录成功"}
 
         _session = requests.Session()
@@ -369,59 +352,62 @@ class Chaoxing:
             "independentId": 0,
         }
         logger.trace("正在尝试登录...")
-        resp = _session.post(_url, headers=gc.HEADERS, data=_data, timeout=(10, 30))
-        if resp and resp.json()["status"] == True:
+        try:
+            resp = _session.post(_url, headers=gc.HEADERS, data=_data, timeout=(10, 30))
+        except RequestException:
+            _session.close()
+            return {"status": False, "msg": "登录服务连接失败或超时，请检查网络后重试。", "kind": "network_error"}
+        if resp.status_code != 200:
+            status = resp.status_code
+            resp.close()
+            _session.close()
+            return {"status": False, "msg": f"登录服务暂时不可用（HTTP {status}），请稍后重试。", "kind": "service_error"}
+        try:
+            body = resp.json()
+        except ValueError:
+            resp.close()
+            _session.close()
+            return {"status": False, "msg": "登录响应不是有效 JSON，可能需要验证或平台暂时异常，请稍后重试。", "kind": "protocol_error"}
+        if not isinstance(body, dict) or type(body.get('status')) is not bool:
+            resp.close()
+            _session.close()
+            return {"status": False, "msg": "登录响应格式发生变化，请稍后重试或检查更新。", "kind": "protocol_error"}
+        if body['status']:
             save_cookies(_session)
+            # Password authentication replaces the old identity and stale cookies.
+            SessionManager.get_session().cookies.clear()
             SessionManager.update_cookies()
             logger.info("登录成功...")
-            try:
-                realname = self.get_name()
-                if realname:
-                    logger.info(f"当前登录用户: {realname}")
-            except Exception as e:
-                logger.debug(f"获取当前登录用户名失败: {e}")
+            resp.close()
+            _session.close()
             return {"status": True, "msg": "登录成功"}
         else:
-            return {"status": False, "msg": str(resp.json()["msg2"])}
-
-    @staticmethod
-    def get_name() -> str:
-        _session = SessionManager.get_session()
-        try:
-            resp = _session.get("https://passport2.chaoxing.com/mooc/accountManage", timeout=10)
-            if resp.status_code == 200:
-                match = re.search(r'id="messageName"\s+value="([^"]*)"', resp.text)
-                if match:
-                    return match.group(1).strip()
-        except Exception as e:
-            logger.debug(f"获取用户名失败: {e}")
-        return ""
+            message = body.get('msg2') or body.get('msg') or '登录未通过，请检查账密或完成平台验证。'
+            resp.close()
+            _session.close()
+            return {"status": False, "msg": str(message)[:300], "kind": "auth_error"}
 
     def _validate_cookie_session(self) -> bool:
         session = SessionManager.get_instance()._session
         if not session.cookies.get("_uid"):
             return False
 
-        test_session = requests.Session()
-        test_session.headers.update(gc.HEADERS)
-        test_session.cookies.update(session.cookies.get_dict())
-
         try:
-            resp = test_session.post(
+            resp = session.post(
                 "https://mooc2-ans.chaoxing.com/mooc2-ans/visit/courselistdata",
                 data={"courseType": 1, "courseFolderId": 0, "query": "", "superstarClass": 0},
                 timeout=8,
             )
-        except RequestException as exc:
-            logger.debug("Cookie validation request failed: {}", exc)
-            return False
-
-        if resp.status_code != 200:
-            return False
-
-        if "passport2.chaoxing.com" in resp.text or "login" in resp.text.lower():
-            return False
-
+        except RequestException:
+            raise PlatformResponseError('会话校验暂时连接失败或超时，请重试；尚未确认 Cookie 失效。', 'network_error') from None
+        try:
+            text = checked_page(resp, 'courses')
+            courses = decode_course_list(text)
+            self._course_snapshot = (self.get_uid(), time.monotonic(), courses)
+        except (KeyError, IndexError, AttributeError, TypeError):
+            raise PlatformResponseError('课程页面结构变化，无法核验会话，请稍后重试。') from None
+        finally:
+            resp.close()
         return True
 
     def get_fid(self):
@@ -437,6 +423,7 @@ class Chaoxing:
         raise ValueError("Cannot get uid !")
 
     def get_course_list(self):
+        checkpoint(self)
         _session = SessionManager.get_session()
         _url = "https://mooc2-ans.chaoxing.com/mooc2-ans/visit/courselistdata"
         _data = {"courseType": 1, "courseFolderId": 0, "query": "", "superstarClass": 0}
@@ -447,15 +434,26 @@ class Chaoxing:
         _headers = {
             "Referer": "https://mooc2-ans.chaoxing.com/mooc2-ans/visit/interaction?moocDomain=https://mooc1-1.chaoxing.com/mooc-ans",
         }
-        _resp = _session.post(_url, headers=_headers, data=_data)
-        # logger.trace(f"原始课程列表内容:\n{_resp.text}")
+        snapshot = getattr(self, '_course_snapshot', None)
+        self._course_snapshot = None  # A one-use snapshot, never shared across clients/accounts.
+        if snapshot and snapshot[0] == self.get_uid() and time.monotonic() - snapshot[1] < 15:
+            course_list = list(snapshot[2])
+        else:
+            _resp = _session.post(_url, headers=_headers, data=_data)
+            try:
+                course_list = decode_course_list(checked_page(_resp, 'courses'))
+            finally:
+                _resp.close()
         logger.info("课程列表读取完毕...")
-        course_list = decode_course_list(_resp.text)
 
         _interaction_url = "https://mooc2-ans.chaoxing.com/mooc2-ans/visit/interaction"
         _interaction_resp = _session.get(_interaction_url)
-        course_folder = decode_course_folder(_interaction_resp.text)
+        try:
+            course_folder = decode_course_folder(checked_page(_interaction_resp, 'folders'))
+        finally:
+            _interaction_resp.close()
         for folder in course_folder:
+            checkpoint(self)
             _data = {
                 "courseType": 1,
                 "courseFolderId": folder["id"],
@@ -463,88 +461,14 @@ class Chaoxing:
                 "superstarClass": 0,
             }
             _resp = _session.post(_url, data=_data)
-            course_list += decode_course_list(_resp.text)
+            try:
+                course_list += decode_course_list(checked_page(_resp, 'courses'))
+            finally:
+                _resp.close()
         return course_list
 
-    def get_activity_list(self, course: dict) -> list[dict]:
-        s = SessionManager.get_session()
-        url = "https://mobilelearn.chaoxing.com/v2/apis/active/student/activelist"
-        params = {
-            "fid": self.get_fid(),
-            "courseId": course["courseId"],
-            "classId": course["clazzId"],
-            "showNotStartedActive": 0,
-            "_": get_timestamp()
-        }
-        resp = s.get(url, params=params, allow_redirects=False)
-        if resp.status_code != 200:
-            logger.error("Failed to get activity list, return code: " + str(resp.status_code))
-            logger.debug("Request url: " + resp.url)
-            return []
-
-        data = resp.json()
-        if data["result"] != 1:
-            logger.error("Unknown status: {} {}", data["result"], data["errorMsg"])
-            logger.debug("Request url: " + resp.url)
-            return []
-
-        return data["data"]["activeList"]
-
-    def pre_sign(self, course: dict, activity_id):
-        s = SessionManager.get_session()
-        params = {
-            "general": 1,
-            "sys": 1,
-            "ls": 1,
-            "appType": 15,
-            "tid": '',
-            "ut": 's',
-            "uid": self.get_uid(),
-            "activePrimaryId": activity_id,
-            "courseId": course["courseId"],
-            "classId": course["clazzId"],
-        }
-        resp = s.get('https://mobilelearn.chaoxing.com/newsign/preSign', params=params)
-        resp_txt = resp.text
-        logger.debug("Request url" + resp.url)
-        if resp.status_code != 200:
-            logger.error("Failed to get sign in, return code: " + str(resp.status_code) + "message: " + resp_txt)
-
-        return resp_txt
-
-    def sign_in_normal(self, course: dict, activity_id, name="", obj_id="aaa", lat=-1, lon=-1, type_=SignType.NORMAL):
-        s = SessionManager.get_session()
-        params = {
-            "activeId": activity_id,
-            "uid": self.get_uid(),
-            "fid": self.get_fid(),
-            "courseId": course["courseId"],
-            "classId": course["clazzId"],
-            "clientip": "",
-            "objectId": obj_id,
-            "name": name,
-            "useragent": "",
-            "latitude": lat,
-            "longitude": lon,
-            "appType": "15",
-        }
-
-        resp = s.get("https://mobilelearn.chaoxing.com/pptSign/stuSignajax", params=params)
-
-        resp_txt = resp.text
-        if resp.status_code != 200:
-            logger.error("Failed to get sign in, return code: " + str(resp.status_code) + "message: " + resp_txt)
-
-        if type_ != SignType.LOCATION:
-            return resp_txt
-
-        pattern = r"[^0-9\.]*(.+)米[^0-9\.]*"
-        msg = re.match(pattern, resp_txt)
-        logger.warning(f"距离签到位置 {msg}m")
-        # TOD0: Implement triangulation for location signs
-        return resp_txt
-
     def get_course_point(self, _courseid, _clazzid, _cpi):
+        checkpoint(self)
         _session = SessionManager.get_session()
         _url = f"https://mooc2-ans.chaoxing.com/mooc2-ans/mycourse/studentcourse?courseid={_courseid}&clazzid={_clazzid}&cpi={_cpi}&ut=s"
         logger.trace("URL: " + _url)
@@ -553,13 +477,19 @@ class Chaoxing:
 
         logger.trace(f"原始章节列表内容:\n{_resp.text}")
         logger.info("课程章节读取成功...")
-        return decode_course_point(_resp.text)
+        try:
+            return decode_course_point(checked_page(_resp, 'chapters', _courseid, _clazzid))
+        except (KeyError, IndexError, AttributeError, TypeError):
+            raise PlatformResponseError('章节页面结构发生变化，未将其当作空章节。') from None
+        finally:
+            _resp.close()
 
     def get_job_list(self, course: dict, point: dict) -> tuple[list[dict], dict]:
         _session = SessionManager.get_session()
         self.rate_limiter.limit_rate()
         job_list = []
         job_info = {}
+        recognized = False
         cards_params = {
             "clazzid": course["clazzId"],
             "courseid": course["courseId"],
@@ -572,17 +502,18 @@ class Chaoxing:
 
         # 学习界面任务卡片数, 很少有3个的, 但是对于章节解锁任务点少一个都不行, 可以从API /mooc-ans/mycourse/studentstudyAjax获取值, 或者干脆直接加, 但二者都会造成额外的请求
         for _possible_num in "0123456":
+            checkpoint(self)
 
             logger.trace("开始读取章节所有任务点...")
 
             cards_params.update({"num": _possible_num})
             _resp = _session.get("https://mooc1.chaoxing.com/mooc-ans/knowledge/cards", params=cards_params)
-            if _resp.status_code != 200:
-                logger.error(f"未知错误: {_resp.status_code} 正在跳过")
-                logger.error(_resp.text)
-                return [], {}
-
-            _job_list, _job_info = decode_course_card(_resp.text)
+            try:
+                text = checked_page(_resp, 'cards')
+                recognized = recognized or bool(re.search(r'\bmArg\s*=', text))
+                _job_list, _job_info = decode_course_card(text)
+            finally:
+                _resp.close()
             if _job_info.get("notOpen", False):
                 # 直接返回, 节省一次请求
                 logger.info("该章节未开放")
@@ -592,7 +523,11 @@ class Chaoxing:
             job_info.update(_job_info)
 
         if not job_list:
-            self.study_emptypage(course, point)
+            if not recognized:
+                raise PlatformResponseError('无法确认任务卡是否为空，请重试；未跳过该章节。')
+            checkpoint(self)
+            if self.study_emptypage(course, point).is_failure():
+                raise PlatformResponseError('空章节访问失败，请重试。', 'service_error')
 
         logger.trace(f"原始任务点列表内容:\n{_resp.text}")
         logger.info("章节任务点读取成功...")
@@ -622,6 +557,8 @@ class Chaoxing:
             logger.warning("null headers")
             headers = gc.VIDEO_HEADERS
 
+        if self._captcha_recovery.blocked:
+            return False, 428  # Local state: stop retries until manual verification.
         self.video_log_limiter.limit_rate(random_time=True, random_max=2)
 
         if "courseId" in _job["otherinfo"]:
@@ -662,39 +599,18 @@ class Chaoxing:
         if att_duration_enc:
             params["attDurationEnc"] = att_duration_enc
 
+        verification_required = False
+
         def perform_request(rt_val):
+            nonlocal verification_required
             params.update({"rt": rt_val, "_t": get_timestamp()})
+            generation = self._captcha_recovery.generation
             res = _session.get(_url, params=params, headers=headers)
-            if res.status_code == 403 or '验证码' in res.text or 'validate' in res.text:
-                logger.warning("检测到验证码拦截，正在尝试自动通过验证码...")
-                try:
-                    from api.captcha import CxCaptcha
-                    cookies_str = "; ".join([f"{k}={v}" for k, v in _session.cookies.items()])
-                    ua = headers.get("User-Agent", gc.HEADERS.get("User-Agent"))
-                    ocr_inst = getattr(self, '_ocr', None)
-                    if ocr_inst is None:
-                        from api.captcha import ocr_init
-                        ocr_inst = ocr_init()
-                        if ocr_inst:
-                            self._ocr = ocr_inst
-                    captcha_solver = CxCaptcha(user_agent=ua, cookies=cookies_str, ocr=ocr_inst)
-                    solved = False
-                    for attempt in range(3):
-                        logger.info(f"第 {attempt + 1} 次尝试通关验证码...")
-                        if captcha_solver.try_pass():
-                            logger.success("验证码通关成功！")
-                            solved = True
-                            break
-                        else:
-                            logger.warning("验证码验证失败，正在重试...")
-                            time.sleep(2)
-                    if solved:
-                        _session.cookies.update(captcha_solver.s.cookies)
-                        res = _session.get(_url, params=params, headers=headers)
-                    else:
-                        logger.error("多次验证码通关失败，可能需要手动干预。")
-                except Exception as e:
-                    logger.error(f"验证码通关逻辑异常: {e}")
+            from api.captcha import is_captcha_response
+            if is_captcha_response(res):
+                ua = headers.get('User-Agent', gc.HEADERS.get('User-Agent'))
+                res, verification_required = self._captcha_recovery.recover(
+                    _session, ua, res, lambda: _session.get(_url, params=params, headers=headers), generation)
             return res
 
         rt = _job['rt']
@@ -713,9 +629,11 @@ class Chaoxing:
             logger.warning("Failed to get rt")
             for rt in [0.9, 1]:
                 resp = perform_request(rt)
+                if verification_required:
+                    resp.close()
+                    return False, 428
                 if resp.status_code == 200:
-                    logger.trace(resp.text)
-                    return resp.json()["isPassed"], 200
+                    break
                 elif resp.status_code == 403:
                     logger.warning("出现403报错, 正常尝试切换rt")
                 else:
@@ -725,9 +643,21 @@ class Chaoxing:
                                    resp.text[:200])
                     break
 
+        if verification_required:
+            resp.close()
+            return False, 428
+
         if resp.status_code == 200:
-            logger.trace(resp.text)
-            return resp.json()["isPassed"], 200
+            try:
+                data = resp.json()
+                if not isinstance(data, dict) or not isinstance(data.get('isPassed'), bool):
+                    raise ValueError
+                return data['isPassed'], 200
+            except ValueError:
+                logger.warning('媒体上报响应不是有效的进度 JSON，未确认任务完成。')
+                return False, 502
+            finally:
+                resp.close()
 
         elif resp.status_code == 403:
             logger.debug(
@@ -737,15 +667,14 @@ class Chaoxing:
             )
 
             # 若出现两个rt参数都返回403的情况, 则跳过当前任务
-            logger.error("出现403报错, 尝试修复无效, 正在跳过当前任务点...")
-            logger.error("请求url: {}", resp.url)
-            logger.error("请求头: {}", dict(_session.headers) | headers)
+            logger.warning('媒体上报 HTTP 403，会话或权限仍未恢复。')
+            resp.close()
             return False, 403
 
         logger.error(f"未知错误: {resp.status_code}")
-        logger.error("请求url:", resp.url)
-        logger.error("请求头：", dict(_session.headers) | headers)
-        return False, resp.status_code
+        status = resp.status_code
+        resp.close()
+        return False, status
 
     def _refresh_video_status(self, session: requests.Session, job: dict, _type: Literal["Video", "Audio"]) \
             -> Optional[dict]:
@@ -788,16 +717,6 @@ class Chaoxing:
 
         return None
 
-    @staticmethod
-    def _close_pbar_safe(pbar_ref):
-        if pbar_ref is not None:
-            try:
-                pbar_ref.leave = False
-                pbar_ref.close()
-            except Exception as e:
-                logger.trace(f"关闭进度条失败: {e}")
-        return None
-
     def study_video(self, _course, _job, _job_info, _speed: float = 1.0,
                     _type: Literal["Video", "Audio"] = "Video") -> StudyResult:
         _session = SessionManager.get_session()
@@ -812,85 +731,110 @@ class Chaoxing:
 
         _dtoken = _video_info["dtoken"]
 
-        _crc = _video_info["crc"]
-        _key = _video_info["key"]
-
-        # Time in the real world: last_iter, gc.THRESHOLD
-        # Time in the video (can be scaled with the speed factor): duration, play_time, last_log_time, wait_time
-
         duration = int(_video_info["duration"])
-        play_time = int(_job["playTime"]) // 1000
-        last_log_time = 0
-        last_iter = time.time()
-        wait_time = int(random.uniform(30, 90))
+        play_time = min(duration, max(0, int(_job["playTime"]) // 1000))
+        # The card interval is in wall-clock seconds, independent of playback
+        # speed. Invalid values must not cause a tight retry loop or endless wait.
+        try:
+            report_interval = float(_job_info.get("reportTimeInterval", 60))
+            if not 1 <= report_interval <= 300:
+                raise ValueError
+        except (TypeError, ValueError, OverflowError):
+            report_interval = 60.0
+        last_iter = time.monotonic()
+        next_report_at = last_iter
 
-        logger.info(f"开始任务: {_job['name']}, 总时长: {duration}s, 已进行: {play_time}s")
+        logger.info("开始任务: {}, 总时长: {}s, 已进行: {}s, 倍速: {}, 上报间隔: {}s",
+                    _job['name'], duration, play_time, _speed, report_interval)
+        def report_media(verified=False):
+            callback = getattr(self, 'desktop_media_progress', None)
+            if callback:
+                callback(name=_job['name'], kind=_type, duration=duration,
+                         position=duration if verified else play_time, verified=verified)
+        report_media()
 
         forbidden_retry = 0
         max_forbidden_retry = 2
+        completion_attempts = 0
+        first_report = True
+        end_reported = False
 
-        passed, state = self.video_progress_log(_session, _course, _job, _job_info, _dtoken, duration, duration,
-                                                _type, headers=headers, _isdrag=4)
-        if passed:
-            logger.info("任务瞬间完成: {}", _job['name'])
-            return StudyResult.SUCCESS
+        while True:
+            checkpoint(self, cancel_only=True)
+            now = time.monotonic()
+            # Preserve the recorded position for the first report. Subsequent
+            # updates include request time, just as playback continues during IO.
+            if not first_report:
+                play_time = min(duration, play_time + (now - last_iter) * _speed)
+            last_iter = now
+            at_end = play_time >= duration
+            if now >= next_report_at or (at_end and not end_reported):
+                initial = first_report
+                first_report = False
 
-        pbar = None
-        try:
-            while not passed:
-                # Sometimes the last request needs to be sent several times to complete the task
-                if play_time - last_log_time >= wait_time or play_time == duration:
+                # Chaoxing's player maps the ended event to isdrag=4. A full
+                # playingTime with the ordinary heartbeat type (3) is not an
+                # ended event. Only send it once the recorded/local time is full.
+                passed, state = self.video_progress_log(_session, _course, _job, _job_info, _dtoken, duration,
+                                                        int(play_time), _type, headers=headers,
+                                                        _isdrag=4 if at_end else 3)
 
-                    passed, state = self.video_progress_log(_session, _course, _job, _job_info, _dtoken, duration,
-                                                            int(play_time), _type, headers=headers)
+                if state == 428:
+                    return StudyResult.VERIFICATION_REQUIRED
+                if state == 403:
+                    if forbidden_retry >= max_forbidden_retry:
+                        logger.warning('媒体上报持续 HTTP 403，未发现可自动处理的验证码；请检查登录会话、访问权限与网络，章节保留待处理。')
+                        return StudyResult.FORBIDDEN
+                    forbidden_retry += 1
+                    logger.warning(
+                        "出现403报错, 正在尝试刷新会话状态 (第{}次)",
+                        forbidden_retry,
+                    )
+                    time.sleep(random.uniform(2, 4))
+                    refreshed_meta = self._recover_after_forbidden(_session, _job, _type)
+                    if refreshed_meta and refreshed_meta.get("dtoken") and refreshed_meta.get(
+                            "duration") is not None:
+                        _dtoken = refreshed_meta["dtoken"]
+                        duration = int(refreshed_meta["duration"])
+                        refreshed_play_time = refreshed_meta.get("playTime")
+                        if refreshed_play_time is not None:
+                            play_time = min(duration, max(0, int(refreshed_play_time)))
 
-                    if state == 403:
-                        if forbidden_retry >= max_forbidden_retry:
-                            logger.warning("403重试失败, 跳过当前任务")
-                            return StudyResult.FORBIDDEN
-                        forbidden_retry += 1
-                        logger.warning(
-                            "出现403报错, 正在尝试刷新会话状态 (第{}次)",
-                            forbidden_retry,
-                        )
-                        time.sleep(random.uniform(2, 4))
-                        refreshed_meta = self._recover_after_forbidden(_session, _job, _type)
-                        if refreshed_meta and refreshed_meta.get("dtoken") and refreshed_meta.get(
-                                "duration") is not None:
-                            _dtoken = refreshed_meta["dtoken"]
-                            duration = int(refreshed_meta["duration"])
-                            refreshed_play_time = refreshed_meta.get("playTime")
-                            if refreshed_play_time is not None:
-                                play_time = int(refreshed_play_time)
+                        logger.debug("刷新后的持续时间: {}, 播放时间: {}", duration, play_time)
+                        next_report_at = time.monotonic()
+                        end_reported = False
+                        continue
+                    else:
+                        logger.warning('403 会话恢复失败，请重新登录并确认课程访问权限；章节保留待处理。')
+                        return StudyResult.FORBIDDEN
 
-                            logger.debug("刷新后的令牌: {}, 持续时间: {}, 播放时间: {}", _dtoken, duration, play_time)
-                            pbar = self._close_pbar_safe(pbar)
-                            continue
-                        else:
-                            logger.error("会话恢复失败，刷新后的元数据缺少必要字段 (dtoken, duration)")
-                            return StudyResult.ERROR
+                elif not passed and state != 200:
+                    return StudyResult.ERROR
 
-                    elif not passed and state != 200:
-                        return StudyResult.ERROR
+                if passed:
+                    report_media(True)
+                    logger.info("任务完成: {}", _job['name'])
+                    return StudyResult.SUCCESS
 
-                    wait_time = int(random.uniform(30, 90))
-                    last_log_time = play_time
+                # Space completion confirmations too: five requests a second
+                # apart give the platform only a few seconds to settle. Keep a
+                # finite retry count, with one full card interval between them.
+                next_report_at = time.monotonic() + report_interval
+                if at_end:
+                    end_reported = True
+                    if not initial:
+                        completion_attempts += 1
+                    logger.info("任务「{}」时长已到达，平台尚未确认；结束确认 {}/5，上报类型=4，间隔={}s",
+                                _job['name'], completion_attempts, report_interval)
+                    if completion_attempts >= 5:
+                        logger.warning("任务「{}」结束上报后平台仍未确认完成，已按 {}s 间隔核验，任务点保留待核验",
+                                       _job['name'], report_interval)
+                        return StudyResult.TIMEOUT
 
-                    logger.trace("Progress logged")
+                logger.trace("Progress logged")
 
-                # Uploading the progress takes time, we assume that the video is still playing in the background, this manually calculates the time elapsed
-                dt = (time.time() - last_iter) * _speed
-                last_iter = time.time()
-                play_time = min(duration, play_time + dt)
-
-                # Progress is represented by desktop task events.
-
-                time.sleep(gc.THRESHOLD)
-        finally:
-            pbar = self._close_pbar_safe(pbar)
-
-        logger.info("任务完成: {}", _job['name'])
-        return StudyResult.SUCCESS
+            report_media()
+            controlled_wait(self, gc.THRESHOLD, cancel_only=True)
 
     def study_document(self, _course, _job) -> StudyResult:
         """
@@ -925,6 +869,7 @@ class Chaoxing:
             return StudyResult.SUCCESS
 
     def study_work(self, _course, _job, _job_info) -> StudyResult:
+        checkpoint(self)
         if self.tiku.DISABLE or not self.tiku:
             return StudyResult.SUCCESS
 
@@ -989,6 +934,7 @@ class Chaoxing:
         last_submitted_score = None
 
         for attempt in range(max_retries + 1):
+            checkpoint(self)
             if attempt > 0:
                 logger.warning(
                     f"章节检测重做第 {attempt}/{max_retries} 轮，携带上一轮错误反馈重新作答")
@@ -1025,6 +971,8 @@ class Chaoxing:
             found_answers = 0
             filled_answers = 0
             random_answers = 0
+            if hasattr(self.tiku, 'set_context'):
+                self.tiku.set_context(attempt=attempt)
             answers = self.tiku.query_all(questions["questions"], query_delay=query_delay)
 
             if not isinstance(answers, list):
@@ -1084,10 +1032,15 @@ class Chaoxing:
                     elif q["type"] == "judgement":
                         answer = "true" if self.tiku.judgement_select(res) else "false"
                     elif q["type"] == "completion":
-                        if isinstance(res, list):
-                            answer = "".join(res)
-                        elif isinstance(res, str):
-                            answer = res
+                        from chaoxing_desktop.completion import completion_parts
+                        fields = q.get('completion_fields', [])
+                        parts = completion_parts(res, q.get('blank_count'))
+                        if parts and len(fields) == len(parts):
+                            q['answerField'].update(zip(fields, parts))
+                            answer = parts[0] if len(parts) == 1 and fields[0] == f'answer{q["id"]}' else '已按空位填写'
+                        else:
+                            answer = ''
+                            logger.warning('填空字段或数量无法核验，保留待处理')
                     else:
                         # 其他类型直接使用答案 （目前仅知有简答题，待补充处理）
                         answer = res
@@ -1106,7 +1059,7 @@ class Chaoxing:
                             q[f'answerSource{q["id"]}'] = "cover"
                             found_answers += 1
                 # 填充答案
-                q["answerField"][f'answer{q["id"]}'] = answer
+                q["answerField"][f'answer{q["id"]}'] = answer if q['type'] != 'completion' or q.get('completion_fields') == [f'answer{q["id"]}'] else ''
                 logger.info(f'{q["title"]} 填写答案为 {answer}')
             cover_rate = (found_answers / total_questions) * 100
             logger.info(f"章节检测题库覆盖率： {cover_rate:.0f}%")
@@ -1120,6 +1073,12 @@ class Chaoxing:
             else:
                 questions["pyFlag"] = "1"
                 logger.info("仍有未解决题目，已保存可用答案，等待人工处理")
+            checkpoint(self)
+            # Named completion inputs are copied exactly as observed in the form.
+            for q in questions['questions']:
+                for field in q.get('completion_fields', []):
+                    if field in q['answerField']:
+                        questions[field] = q['answerField'][field]
             # 组建提交表单
             if questions["pyFlag"] == "1":
                 for q in questions["questions"]:
@@ -1142,6 +1101,7 @@ class Chaoxing:
             del questions["questions"]
 
             # 4. 提交
+            checkpoint(self)
             res = _session.post(
                 "https://mooc1.chaoxing.com/mooc-ans/work/addStudentWorkNew",
                 data=questions,
@@ -1212,7 +1172,6 @@ class Chaoxing:
                 f"章节检测有 {wrong_count}/{total_questions} 题回答错误（成绩 {score} 分），"
                 f"已将错误反馈给AI，准备重新作答提交 (第 {attempt + 1}/{max_retries + 1} 轮)"
             )
-            self.rollback_times += 1
             last_submitted_score = score
 
         # 达到最大重试次数仍未全对
@@ -1564,7 +1523,9 @@ class Chaoxing:
             logger.warning("章节列表为空, 跳过章节学习次数增加")
             return StudyResult.SUCCESS
         while total < target_count:
+            checkpoint(self)
             for point in points:
+                checkpoint(self)
                 if total >= target_count:
                     break
                 self.rate_limiter.limit_rate(random_time=True, random_min=0, random_max=0.2)
@@ -1582,15 +1543,18 @@ class Chaoxing:
                 consecutive_failures = 0
 
                 # 第 1 步：从 HTML 中提取 setlog URL 并执行（真正的计次 API）
+                checkpoint(self)
                 self._extract_and_send_setlog(html_text)
 
                 # 第 2 步：立即发送 monitor 心跳包（模拟 fn()）
+                checkpoint(self)
                 self._send_monitor_heartbeat(course, point)
 
                 # 第 3 步：停留 30 秒（模拟前端 setInterval 间隔）
-                time.sleep(30)
+                controlled_wait(self, 30)
 
                 # 第 4 步：再次发送 monitor 心跳包（模拟 setInterval 触发的第二次心跳）
+                checkpoint(self)
                 self._send_monitor_heartbeat(course, point)
 
                 total += 1

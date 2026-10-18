@@ -10,7 +10,7 @@ root = Path(__file__).resolve().parents[1]
 target = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else root / "dist/ChaoxingDesktop"
 destination = Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else root.parent / "plans/release-smoke"
 destination.mkdir(parents=True, exist_ok=True)
-env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
+env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QSG_RHI_BACKEND="software")
 # No developer venv or Python directory in PATH.
 env["PATH"] = os.path.join(env.get("WINDIR", "C:/Windows"), "System32")
 with tempfile.TemporaryDirectory() as data:
@@ -20,10 +20,24 @@ with tempfile.TemporaryDirectory() as data:
     assert probe.returncode == 0, probe.stdout + probe.stderr
     events = [json.loads(line) for line in probe.stdout.splitlines()]
     assert events[-1]["type"] == "probe", events
-    print("Frozen core imports and font resources passed.")
-result = subprocess.run([str(target / "ChaoxingDesktop.exe"), "--smoke-test", str(destination)],
-                        capture_output=True, timeout=55, env=env)
-assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    assert events[-1].get('bank_protocol') == 'v2-text-and-images', events
+    assert events[-1].get('captcha_ready') is True, events
+    assert events[-1].get('review_policy_ready') is True, events
+    assert events[-1].get('matching_ready'), events
+    assert events[-1].get('ocs_ready') is True, events
+    print("Frozen core, font resources, v2 bank parameters, PNG Base64 codec and OCR inference passed.")
+if "--worker-only" in sys.argv:
+    raise SystemExit(0)
+# Use the same native Windows launch route as normal desktop use. The GUI
+# reports diagnostics through result.json, independently of console handles.
+command = [str(target / "ChaoxingDesktop.exe"), "--smoke-test", destination.as_posix()]
+if os.name == "nt":
+    powershell = Path(env.get("WINDIR", "C:/Windows")) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+    command = [str(powershell), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+               str(root / "scripts/run_gui_smoke.ps1"), "-Executable", str(target / "ChaoxingDesktop.exe"),
+               "-Destination", str(destination)]
+result = subprocess.run(command, timeout=60, env=env)
+assert result.returncode == 0, f"Windowed launcher exited with {result.returncode}; see {destination / 'result.json'}"
 report = json.loads((destination / "result.json").read_text(encoding="utf-8"))
 assert report["success"], report
 print(report["message"])

@@ -272,9 +272,11 @@ def _process_attachment_cards(cards: List[Dict[str, Any]]) -> List[Dict[str, Any
             live_job = _process_live_task(card)
             if live_job:
                 job_list.append(live_job)
-        elif card_type == "video":
+        elif card_type in ("video", "audio"):
             video_job = _process_video_task(card)
             if video_job:
+                if card_type == 'audio' or prop_type == 'audio' or resource_type == 'audio':
+                    video_job['type'] = 'audio'
                 job_list.append(video_job)
         elif card_type == "document":
             doc_job = _process_document_task(card)
@@ -334,12 +336,14 @@ def _process_read_task(card: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 def _process_video_task(card: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """处理视频类型任务"""
     try:
+        is_audio = any(str(source).lower() == 'audio' for source in (
+            card.get('type'), card.get('property', {}).get('type'), card.get('property', {}).get('resourceType')))
         return {
             "type": "video",
             "jobid": card.get("jobid", ""),
             "name": card.get("property", {}).get("name", ""),
             "otherinfo": card.get("otherInfo", ""),
-            "mid": card["mid"],  # 必须字段，如果不存在会抛出异常
+            "mid": card.get("mid", "") if is_audio else card["mid"],
             "objectid": card.get("objectId", ""),
             "aid": card.get("aid", ""),
             "playTime": card.get("playTime", 0),
@@ -461,6 +465,15 @@ def _process_question(div_tag, font_decoder=None) -> Dict[str, Any]:
 
     # 解析题目和选项
     q_title = _extract_title(title_div, font_decoder)
+    # Extracting all DOM descendants can concatenate the separate number and
+    # type spans with a year in the body. Remove only an explicit type header;
+    # never guess by trimming digits from a year or mathematical expression.
+    q_title = re.sub(
+        r'^\s*(?:\d+\s*[.、。]?\s*)?[\[(【（]\s*'
+        r'(?:单选题|多选题|判断题|填空题|简答题|名词解释|完形填空|阅读理解)'
+        r'(?:\s*[,，]\s*\d+(?:\.\d+)?\s*分)?\s*[\])】）]\s*',
+        '', q_title,
+    )
     q_options = []
     for li in options_list:
         q_options.append(_extract_choices(li, font_decoder))
@@ -468,7 +481,18 @@ def _process_question(div_tag, font_decoder=None) -> Dict[str, Any]:
     q_options.sort()
     q_options = '\n'.join(q_options)
 
+    completion_fields = []
+    if q_type == 'completion' and question_id:
+        for field in div_tag.find_all(['textarea', 'input']):
+            name = field.get('name', '')
+            if (field.name == 'textarea' or field.get('type', 'text').lower() == 'text') and re.fullmatch(r'answer' + re.escape(question_id) + r'(?:[_-]?\d+)?', name):
+                if name in completion_fields:
+                    completion_fields = []
+                    break  # Repeated field names require a separate array protocol.
+                completion_fields.append(name)
     return {
+        'blank_count': len(completion_fields) or None,
+        'completion_fields': completion_fields,
         "id": question_id,
         "title": q_title,
         "options": q_options,

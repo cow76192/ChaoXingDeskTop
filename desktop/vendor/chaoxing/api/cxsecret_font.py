@@ -39,7 +39,8 @@ def resource_path(relative_path: str) -> str:
         资源文件的绝对路径
     """
     # Desktop adaptation: resources are read-only, worker cwd stores user data.
-    base_path = Path(__file__).resolve().parents[1]
+    base_path = (Path(sys._MEIPASS) / 'vendor/chaoxing'
+                 if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[1])
 
     return os.path.join(base_path, relative_path)
 
@@ -83,19 +84,6 @@ class FontHashDAO:
         """
         return self.hash_map.get(font_hash)
 
-    def find_hash(self, char: str) -> Optional[str]:
-        """
-        通过Unicode字符编码查找对应的字体哈希值
-
-        Args:
-            char: Unicode字符编码 (如 "uni4E00")
-
-        Returns:
-            对应的字体哈希值，如果未找到则返回None
-        """
-        return self.char_map.get(char)
-
-
 # 初始化字体哈希DAO单例
 try:
     fonthash_dao = FontHashDAO()
@@ -104,6 +92,23 @@ except Exception as e:
     fonthash_dao = FontHashDAO.__new__(FontHashDAO)
     fonthash_dao.char_map = {}
     fonthash_dao.hash_map = {}
+
+
+# Update this checksum together with the bundled upstream mapping table.
+FONT_MAP_SHA256 = "6a5e5e3772bd6ff8ad4227649c36b24178141f4ae8cc4640f7daeab2699812f7"
+
+
+def validate_font_resources():
+    """Reject missing or modified mappings before any real platform request."""
+    message = "字体资源缺失或损坏，请重新解压完整的软件包。"
+    if len(fonthash_dao.char_map) <= 100 or not fonthash_dao.hash_map:
+        raise FontDecodeError(message)
+    try:
+        content = Path(resource_path("resource/font_map_table.json")).read_bytes()
+    except OSError as exc:
+        raise FontDecodeError(message) from exc
+    if hashlib.sha256(content).hexdigest() != FONT_MAP_SHA256:
+        raise FontDecodeError(message)
 
 
 def hash_glyph(glyph: Glyph) -> str:

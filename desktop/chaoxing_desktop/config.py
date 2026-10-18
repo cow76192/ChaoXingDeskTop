@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import configparser
 import io
+import json
 import os
 import re
 import sys
 from pathlib import Path
 
-BANKS = (("GO 题库", "TikuGo"), ("言溪题库", "TikuYanxi"),
-         ("LIKE 知识库", "TikuLike"), ("自定义题库 Adapter", "TikuAdapter"))
+from .providers import PROVIDERS
+BANKS = tuple((spec.title, spec.id) for spec in PROVIDERS)
+CONFIG_VERSION = 1
+BANK_REVIEW_POLICIES = (("严格核验（默认）", "strict"),
+                        ("跟随 AI 状态", "ai_dependent"),
+                        ("选项优先（放宽题干）", "options_only"))
 NOTIFICATIONS = ("ServerChan", "Qmsg", "Bark", "Telegram")
 SECRET_KEYS = {"password", "tokens", "token", "key", "siliconflow_key", "go_authorization",
                "url", "adapter_url", "tg_chat_id", "http_proxy", "cookies", "cookie"}
@@ -17,7 +22,8 @@ BOOLEAN_KEYS = {
     "tiku": ("submit",),
     "ai": ("enabled", "vision", "check_connection"),
     "desktop": ("manual_fallback", "random_fallback"),
-    "question_bank": ("likeapi_search", "likeapi_vision", "likeapi_retry"),
+    "question_bank": ("likeapi_search", "likeapi_vision", "likeapi_retry", "yanxi_query_variants"),
+    "matching": ("fuzzy_options", "reuse_similar"),
 }
 
 
@@ -28,6 +34,13 @@ def resource_root() -> Path:
 def data_dir() -> Path:
     override = os.environ.get("CHAOXING_DESKTOP_DATA")
     path = Path(override) if override else Path(os.environ.get("LOCALAPPDATA", Path.home())) / "ChaoxingDesktop"
+    if not override and getattr(sys, "frozen", False):
+        marker = Path(sys.executable).resolve().with_name("installation.json")
+        if marker.is_file():
+            profile = json.loads(marker.read_text(encoding="utf-8"))["profile"]
+            if not isinstance(profile, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}", profile):
+                raise ValueError("安装配置标识无效，请重新安装。")
+            path = path / "profiles" / profile
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -52,8 +65,29 @@ def defaults() -> configparser.ConfigParser:
                    vision="false", min_interval_seconds="3.0", http_proxy="",
                    check_connection="true", timeout="60", retries="2"),
         "desktop": dict(manual_fallback="false", random_fallback="false"),
+        "logging": dict(directory=""),
+        "matching": dict(bank_review_policy="strict", fuzzy_options="true", min_similarity="0.92", min_margin="0.08",
+                         reuse_similar="true", title_similarity="0.96"),
         "notification": dict(provider="", url="", tg_chat_id=""),
     })
+    bank = config["question_bank"]
+    bank['yanxi_query_variants'] = 'true'
+    bank['yanxi_variant_limit'] = '2'
+    for prefix, address, timeout in (("yanxi", "https://tk.enncy.cn/query", "30"),
+                                     ("go", "https://q.icodef.com/wyn-nb?v=4", "15"),
+                                     ("like", "https://app.datam.site/api/v1/query", "300"),
+                                     ("adapter", "", "30")):
+        if prefix != "adapter":
+            bank[prefix + "_endpoint"] = address
+        bank[prefix + "_timeout"] = timeout
+        if prefix != "go":
+            bank[prefix + "_min_interval"] = "1.0"
+        if prefix in ("yanxi", "adapter", "declarative"):
+            bank[prefix + "_retries"] = "2"
+    config['format'] = {'version': str(CONFIG_VERSION)}
+    config['question_bank'].update(declarative_definition='', declarative_token='',
+                                  declarative_timeout='30', declarative_min_interval='1.0',
+                                  declarative_retries='2', request_budget='12')
     return config
 
 
@@ -61,10 +95,27 @@ def parse_text(text: str) -> configparser.ConfigParser:
     config = defaults()
     incoming = parser()
     incoming.read_string(text.lstrip("\ufeff"))
+    try:
+        version = int(incoming.get('format', 'version', fallback='0'))
+    except ValueError:
+        raise ValueError('配置格式版本无效') from None
+    if version < 0 or version > CONFIG_VERSION:
+        raise ValueError('配置来自更新版本的软件，请先升级；原文件未修改。')
     for section in incoming.sections():
         if not config.has_section(section):
             config.add_section(section)
         config[section].update(incoming[section])
+    # Preserve the old global interval when importing configurations predating
+    # independent bank settings. Newly saved settings always take precedence.
+    if incoming.has_option("tiku", "delay"):
+        for prefix in ("yanxi", "like", "adapter"):
+            key = prefix + "_min_interval"
+            if not incoming.has_option("question_bank", key):
+                config["question_bank"][key] = incoming["tiku"]["delay"]
+    # Releases through 0.2.2 redacted this switch as if it were a Cookie secret.
+    # Recover the default for the lost switch without discarding other settings.
+    if not config["common"]["use_cookies"].strip():
+        config["common"]["use_cookies"] = "false"
     # Migrate old INI files once; desktop sections take precedence on re-import.
     if incoming.has_section("tiku"):
         old = incoming["tiku"]
@@ -98,6 +149,7 @@ def parse_text(text: str) -> configparser.ConfigParser:
     for key in list(config["tiku"]):
         if key in legacy_keys:
             del config["tiku"][key]
+    config['format']['version'] = str(CONFIG_VERSION)
     return config
 
 
@@ -112,32 +164,41 @@ def serialize(config: configparser.ConfigParser, include_secrets: bool = True) -
 
 def is_secret(key: str) -> bool:
     key = key.lower()
+    if key == "use_cookies":
+        return False
     return key in SECRET_KEYS or any(s in key for s in ("password", "token", "secret", "authorization", "cookie", "api_key")) or key.endswith("_key")
 
 
-def validate(config: configparser.ConfigParser, login: bool = False, services: bool = False) -> None:
+def validate(config: configparser.ConfigParser, login: bool = False, services: bool = False,
+             cookie_path: Path | None = None) -> None:
+    if config.get('format', 'version', fallback='') != str(CONFIG_VERSION):
+        raise ValueError('配置格式版本无效或来自更新版本')
     c, t, n = (config[s] for s in ("common", "tiku", "notification"))
-    numeric = [(c, "speed", 1, 2, float), (c, "jobs", 1, 16, int),
-               (c, "retry_interval", 0.1, 3600, float), (c, "target_count", 1, 100000, int),
-               (c, "work_max_retries", 0, 20, int), (t, "cover_rate", 0, 1, float),
-               (t, "delay", 0, 3600, float),
-               (config["ai"], "min_interval_seconds", 0, 3600, float),
-               (config["ai"], "timeout", 5, 300, int), (config["ai"], "retries", 0, 5, int),
-               (config["question_bank"], "go_min_interval", 0, 3600, float),
-               (config["question_bank"], "go_retry_times", 1, 20, int),
-               (config["question_bank"], "go_retry_backoff", 1, 10, float),
-               (config["question_bank"], "likeapi_retry_times", 0, 20, int)]
+    # One numeric contract for UI edits, INI imports and workers.
+    from .qml_schema import SCHEMA
+    fields = {(f['section'], f['key']): f for groups in SCHEMA.values() for group in groups for f in group['fields']}
+    numeric = [(config[section], key, spec['low'], spec['high'], int if spec['kind'] == 'integer' else float)
+               for (section, key), spec in fields.items() if spec['kind'] in ('integer', 'number')]
+    numeric.append((t, 'cover_rate', 0, 1, float))
+    if config['question_bank']['declarative_definition'].strip():
+        from .declarative import validate_definition
+        validate_definition(config['question_bank']['declarative_definition'])
+    if 'TikuDeclarative' in config['question_bank']['providers'].split(',') and not config['question_bank']['declarative_definition'].strip():
+        raise ValueError('请先导入声明式 JSON 题库定义')
     for section, key, low, high, cast in numeric:
         try:
             value = cast(section[key])
             if not low <= value <= high:
                 raise ValueError
         except (ValueError, KeyError):
-            raise ValueError(f"{key} 必须在 {low}–{high} 范围内。") from None
+            title = fields.get((section.name, key), {}).get('title', key)
+            raise ValueError(f"{title}（{key}）必须在 {low}–{high} 范围内。") from None
     for section, keys in BOOLEAN_KEYS.items():
         for key in keys:
             if config[section][key].lower() not in ("true", "false"):
                 raise ValueError(f"{key} 应填写 true 或 false。")
+    if config['matching']['bank_review_policy'] not in {value for _, value in BANK_REVIEW_POLICIES}:
+        raise ValueError('题库答案审核策略无效，请选择严格核验、跟随 AI 状态或选项优先。')
     if c["notopen_action"] not in ("retry", "ask", "continue"):
         raise ValueError("关闭章节策略应为 retry、ask 或 continue。")
     names = [s.strip() for s in config["question_bank"]["providers"].split(",") if s.strip()]
@@ -149,7 +210,7 @@ def validate(config: configparser.ConfigParser, login: bool = False, services: b
         raise ValueError("通知服务名称无效。")
     if login and c["use_cookies"].lower() != "true" and (not c["username"].strip() or not c["password"].strip()):
         raise ValueError("请填写账号和密码，或选择 Cookie 登录。")
-    if login and c["use_cookies"].lower() == "true" and not (data_dir() / "cookies.txt").is_file():
+    if login and c["use_cookies"].lower() == "true" and not (cookie_path if cookie_path is not None else data_dir() / "cookies.txt").is_file():
         raise ValueError("请先导入 Cookie 文件。")
     if login or services:
         bank, ai = config["question_bank"], config["ai"]
@@ -161,6 +222,10 @@ def validate(config: configparser.ConfigParser, login: bool = False, services: b
         if "TikuAdapter" in names and not bank["adapter_url"].strip():
             raise ValueError("Adapter 题库需要填写 URL。")
         from urllib.parse import urlparse
+        for provider, prefix in (("TikuYanxi", "yanxi"), ("TikuGo", "go"), ("TikuLike", "like")):
+            address = bank[prefix + "_endpoint"].strip()
+            if provider in names and (urlparse(address).scheme not in ("http", "https") or not urlparse(address).netloc):
+                raise ValueError(f"{dict((v, k) for k, v in BANKS)[provider]}地址应为完整的 HTTP 或 HTTPS 地址。")
         for title, address in [("AI 服务地址", ai["endpoint"] if ai["enabled"].lower() == "true" else ""),
                                ("Adapter 地址", bank["adapter_url"] if "TikuAdapter" in names else ""),
                                ("通知地址", n["url"] if n["provider"] else ""), ("AI 代理", ai["http_proxy"])]:
