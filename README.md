@@ -1,42 +1,120 @@
 # 超星 Windows 桌面版
 
-Python、PySide6 / QML 桌面应用，支持 Windows 10/11 x64。当前版本 **0.3.5**，采用 [GPL-3.0](LICENSE) 许可。
+面向 Windows 的超星课程学习工作台，用一个桌面窗口管理账号、课程、章节任务、题库与 AI 服务，以及逐题结果和日志。
 
-下载 [0.3.5 安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/tag/v0.3.5)。本版安装包约 90 MiB，相比 0.3.4 减少约 50%；对应源码与 SHA256 清单随发行版提供。
+**当前版本：0.3.5** · **Windows 10 / 11 x64** · **Python + PySide6 / QML** · **GPL-3.0**
 
-支持多账号及加密 Cookie、课程选择、章节调度、视频 / 音频进度、逐题结果、题库与 AI、人工补全、暂停后续任务、日志和本机设置。首次使用可通过「离线演示」体验。
+[下载安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.5/ChaoxingDesktop-0.3.5-Setup-win-x64.exe) · [发行说明](https://github.com/mikubob/ChaoXingDeskTop/releases/tag/v0.3.5) · [使用与构建指南](desktop/README.md) · [第三方声明](desktop/THIRD_PARTY_NOTICES.md)
 
-## 源码运行
+## 下载与安装
 
-在 `desktop` 目录执行：
+| 文件 | 用途 |
+| --- | --- |
+| [Windows x64 安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.5/ChaoxingDesktop-0.3.5-Setup-win-x64.exe) | 日常使用，约 **89.4 MiB**，已包含 Python 运行环境 |
+| [对应版本源码](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.5/ChaoxingDesktop-0.3.5-source.zip) | 查看实现、自行运行或构建 |
+| [SHA256 校验清单](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.5/ChaoxingDesktop-0.3.5-installer-SHA256.json) | 核对安装包及源码 ZIP 的完整性 |
+
+下载并运行安装包，按提示完成安装后，从桌面或开始菜单打开「超星桌面版」。首次使用可以直接选择「离线演示」，体验界面和任务流程。
+
+**升级已有版本：** 先退出旧程序，再安装到原目录，即可沿用已有设置、账号和 Cookie。卸载程序会保留个人数据。
+
+## 主要功能
+
+| 功能 | 说明 |
+| --- | --- |
+| 多账号管理 | 添加、切换、备注和删除账号；分别保存加密 Cookie，重启后恢复最后选中的账号 |
+| 课程与章节 | 读取与筛选课程，批量选择，配置章节并发、重试与未开放章节处理策略 |
+| 媒体进度 | 展示视频 / 音频时长和播放进度，区分本轮处理进度与平台完成确认 |
+| 题库与 AI | 配置多个题库的查询顺序、凭据、超时和重试，支持 AI 补全与视觉模型 |
+| 答案与逐题结果 | 人工补全、题库答案审核、候选来源与拒绝原因、查询耗时及章节筛选 |
+| 任务与日志 | 暂停后续处理、停止任务、日志搜索与级别筛选、脱敏日志持久化 |
+
+支持声明式 JSON 题库模板，可配置 GET / POST、题型映射和响应字段路径；模板中的 JavaScript 不会执行。
+
+## 开始使用
+
+1. **连接账号**：在「课程与账号」登录，或导入当前账号的 Cookie，然后读取课程。
+2. **选择课程**：勾选需要处理的课程，在「学习设置」调整倍速、并发和章节策略。
+3. **配置服务**：在「题库与 AI」启用所需服务，填写凭据、查询顺序及超时等参数。
+4. **启动任务**：点击「开始所选课程」，在「任务与日志」查看章节进度、媒体状态和逐题结果。
+
+题库按顺序查询，AI 补全未解决的题目，启用人工补全后可继续处理剩余答案。随机补全默认关闭。
+
+默认只保存答案。自动提交需要独立开启，并要求所有题目已有答案；仍有空白题目时仅保存。
+
+## 0.3.5 更新
+
+本版重点减少运行开销与发行体积，并清理无用代码和重复资源。
+
+| 指标 | 0.3.4 | 0.3.5 | 变化 |
+| --- | ---: | ---: | ---: |
+| 安装包 | 178.59 MiB | 89.41 MiB | 减少约 **49.9%** |
+| 完整程序目录 | 508.52 MiB | 347.78 MiB | 减少约 **31.6%** |
+| 离线负载每轮平均耗时 | 2.38 秒 | 1.89 秒 | 减少约 **21%** |
+
+耗时对比来自同一机器上的 3 轮离线软件渲染测试，每轮包含 10000 个章节、3000 条状态与日志事件及 1000 条逐题结果，不代表真实课程或网络请求提速。
+
+- 减少逐题结果的重复脱敏检查与 JSON 解析，保留嵌套脱敏、快照隔离和容量限制。
+- 移除未使用的 OCR 模型、OpenCV 视频组件和 Qt 模块，保留默认 CPU OCR、界面回退、SVG、TLS 和软件渲染。
+- 删除无调用方的姓名查询、旧计数和题库元数据；覆盖升级时清理明确列出的废弃运行文件。
+
+0.3.5 发布时已通过 **288 项单元回归**，以及冻结版 OCR / 后台 / 界面、全新安装、覆盖升级和卸载验收。[该版本的 GitHub CI](https://github.com/mikubob/ChaoXingDeskTop/actions/runs/39120572032) 已通过。
+
+## 数据与凭据
+
+账号、Cookie、设置和日志保存在当前 Windows 用户的本地数据目录中。Cookie、题库 Token、AI Key 等凭据使用 Windows DPAPI 加密，通常绑定当前用户与本机；登录密码不写入账号文件。
+
+安装更新保留原配置标识，卸载保留个人数据。**完整 INI 导出包含明文凭据，请留在本机。** 数据位置和迁移规则见 [账号与本机数据](desktop/README.md#账号与本机数据)。
+
+## 常见问题
+
+### 使用安装包还需要安装 Python 吗？
+
+不需要。安装包包含程序及所需运行环境。仅从源码运行或自行构建时需要安装 Python 和依赖。
+
+### 为什么媒体进度达到 100% 后仍显示待核验？
+
+达到媒体时长后，还需要平台确认完成。界面会区分播放进度、本轮章节处理状态和平台确认状态。
+
+### 为什么切换账号后需要重新读取课程？
+
+课程选择与任务结果按当前账号隔离。切换账号会清空当前课程列表和选择，重新读取即可；运行中的任务需要先停止。
+
+### 「暂停后续」会立即暂停所有请求和媒体吗？
+
+它会阻止后续调度、答题请求与写入，在途请求及当前媒体可以继续。需要结束本轮任务时使用「停止」。
+
+## 从源码运行
+
+开发与构建环境为 **Windows x64、Python 3.13.9**。在 PowerShell 中执行：
 
 ```powershell
+git clone https://github.com/mikubob/ChaoXingDeskTop.git
+cd ChaoXingDeskTop/desktop
 python -m venv .venv
 .venv/Scripts/python.exe -m pip install -r requirements.txt
 .venv/Scripts/python.exe run.py
 ```
 
-开发和构建使用 Windows x64、Python 3.13.9。使用方法、配置及完整构建步骤见 [桌面版说明](desktop/README.md)。
+测试环境准备、构建安装包和发布校验流程见 [开发与构建指南](desktop/README.md#测试)。
 
 ## 项目结构
 
-- `desktop/chaoxing_desktop/`：界面、账号、配置、调度和答题处理。
-- `desktop/vendor/chaoxing/`：改编的平台协议及必要字体资源。
-- `desktop/tests/`：单元、界面和安装验收。
-- `desktop/scripts/`：依赖锁定、构建和发布工具。
-- `.github/workflows/`：Windows 离线回归检查。
+```text
+desktop/
+├── chaoxing_desktop/       # 界面、账号、配置、调度与答案处理
+├── vendor/chaoxing/        # 平台协议适配与字体资源
+├── tests/                 # 单元、界面、性能与安装验收
+├── scripts/               # 依赖锁定、构建与发布工具
+├── assets/                # 应用图标与界面资源
+└── run.py                 # 主程序与后台进程入口
+.github/workflows/         # Windows 离线回归检查
+```
 
-公共仓库与源码包使用相同的明确文件清单，仅包含运行、测试、构建所需源码、资源、说明及许可。历史计划、截图、验收材料、用户数据及本地构建文件不进入发布内容。
+公共仓库与源码 ZIP 使用明确的文件清单，仅包含运行、测试、构建所需源码、资源、说明及许可。历史计划、截图、验收材料、用户数据与本地构建产物不进入发布内容。
 
-## 0.3.5
+## 来源与许可
 
-- 完整程序目录从约 508.5 MiB 降到 347.8 MiB，减少约 31.6%。
-- 删除未使用的 OCR 模型、OpenCV 视频组件和 Qt 模块，保留默认 CPU OCR、界面回退、SVG、TLS 及软件渲染。
-- 减少逐题结果的重复脱敏检查和 JSON 解析；相同离线负载每轮平均从约 2.38 秒降到 1.89 秒。此数据不代表真实课程或网络请求提速。
-- 清理无调用方的姓名查询、旧计数和题库元数据；覆盖升级清理明确列出的废弃运行文件。
+本项目采用 [GPL-3.0](LICENSE) 许可。平台协议参考并改编自 [Samueli924/chaoxing](https://github.com/Samueli924/chaoxing)，固定基线为 `45d2106b16764231c2de2038fb042e71b23d878f`。
 
-## 数据与许可
-
-账号、Cookie、凭据、设置及日志保存在当前 Windows 用户的本地数据目录中。安装更新保留配置标识；卸载保留个人数据。完整 INI 导出可能包含明文凭据，应留在本机。
-
-平台协议参考并改编自 [Samueli924/chaoxing](https://github.com/Samueli924/chaoxing)，固定提交 `45d2106b16764231c2de2038fb042e71b23d878f`。来源、改动和依赖许可见 [THIRD_PARTY_NOTICES.md](desktop/THIRD_PARTY_NOTICES.md)。
+桌面工作台运行不依赖本地参考仓库。上游来源、改动及第三方依赖许可见 [THIRD_PARTY_NOTICES.md](desktop/THIRD_PARTY_NOTICES.md)。
