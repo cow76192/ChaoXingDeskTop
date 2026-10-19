@@ -9,6 +9,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 os.environ.setdefault('QSG_RHI_BACKEND', 'software')
 from PySide6.QtTest import QTest
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QApplication
 from shiboken6 import delete
 from chaoxing_desktop.qml_app import configure_app, create_engine
@@ -40,6 +42,55 @@ def main():
             assert window.grabWindow().save(str(destination / name))
         window.setProperty('pageIndex', 2)
         QTest.qWait(150)
+        services = find('servicesScroll')
+        scroll = services.property('contentItem')
+        def wheel(item, angle=0, pixels=0):
+            point = item.mapToScene(QPointF(item.width() / 2, item.height() / 2))
+            event = QWheelEvent(point, QPointF(window.mapToGlobal(point.toPoint())),
+                                QPoint(0, pixels), QPoint(0, angle), Qt.NoButton,
+                                Qt.NoModifier, Qt.NoScrollPhase, False)
+            QApplication.sendEvent(window, event)
+            QTest.qWait(40)
+        for width, height in ((1440, 900), (980, 700)):
+            window.setWidth(width); window.setHeight(height)
+            QTest.qWait(100)
+            top = scroll.property('originY')
+            scroll.setProperty('contentY', top)
+            token = find('field_question_bank_go_authorization')
+            before = token.property('text')
+            wheel(token, angle=-120)
+            assert abs(scroll.property('contentY') - top - 136) < 1, (width, scroll.property('contentY'))
+            assert token.property('text') == before
+            wheel(services, pixels=-23)
+            assert abs(scroll.property('contentY') - top - 159) < 1
+            wheel(services, angle=120000)
+            assert abs(scroll.property('contentY') - top) < 1
+            wheel(services, angle=-120000)
+            bottom = top + max(0, scroll.property('contentHeight') - scroll.height())
+            assert abs(scroll.property('contentY') - bottom) < 1
+            wheel(services, angle=-120)
+            assert abs(scroll.property('contentY') - bottom) < 1
+            wheel(services, angle=120000)
+            if width == 1440:
+                choice = find('choice_ai_provider')
+                selected = choice.property('currentIndex')
+                wheel(choice, angle=-120)
+                assert abs(scroll.property('contentY') - top - 136) < 1
+                assert choice.property('currentIndex') == selected
+                scroll.setProperty('contentY', top)
+        for index, name in ((1, 'answersScroll'), (2, 'notificationScroll')):
+            find('serviceTabs').setProperty('currentIndex', index)
+            QTest.qWait(100)
+            view = find(name)
+            target = view.property('contentItem')
+            top = target.property('originY')
+            target.setProperty('contentY', top)
+            bottom = top + max(0, target.property('contentHeight') - target.height())
+            wheel(view, angle=-120)
+            assert abs(target.property('contentY') - min(top + 136, bottom)) < 1
+        find('serviceTabs').setProperty('currentIndex', 0)
+        window.setWidth(1280); window.setHeight(860)
+        QTest.qWait(100)
         find('settings_TikuYanxi').clicked.emit()
         QTest.qWait(150)
         field = find('field_question_bank_yanxi_timeout')
@@ -87,7 +138,7 @@ def main():
         window.close()
         delete(engine)
         b.close()
-    print('Service/media smoke passed: independent fields, directory selection, concurrent bars, wide/narrow screenshots, no QML warnings.')
+    print('Service/media smoke passed: 136-pixel mouse steps, precise touchpad deltas, scroll bounds, independent fields, concurrent bars, wide/narrow screenshots, no QML warnings.')
 
 
 if __name__ == '__main__':

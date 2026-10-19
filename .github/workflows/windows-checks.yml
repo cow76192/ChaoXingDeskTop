@@ -38,6 +38,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Question results UI failed' }
           .venv-ci/Scripts/python.exe tests/accounts_ui_smoke.py
           if ($LASTEXITCODE -ne 0) { throw 'Account UI failed' }
+          .venv-ci/Scripts/python.exe tests/services_media_smoke.py build/ci-checks/services
+          if ($LASTEXITCODE -ne 0) { throw 'Service scrolling and media UI failed' }
           .venv-ci/Scripts/python.exe tests/audit_ui_smoke.py
           if ($LASTEXITCODE -ne 0) { throw 'Audit UI regression failed' }
           $env:QT_QPA_PLATFORM = 'offscreen'

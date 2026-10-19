@@ -29,7 +29,8 @@ ColumnLayout {
         Layout.fillWidth: true; Layout.fillHeight: true
         currentIndex: tabs.currentIndex
         ScrollView {
-            id: services; clip: true; contentWidth: availableWidth
+            id: services; objectName: "servicesScroll"; clip: true; contentWidth: availableWidth
+            PageWheelHandler { parent: services.contentItem; scrollTarget: services.contentItem }
             GridLayout {
                 width: services.availableWidth; columns: page.width > 880 ? 2 : 1; columnSpacing: 18; rowSpacing: 18
                 Panel {
@@ -90,8 +91,8 @@ ColumnLayout {
                 Item { Layout.preferredHeight: 8 }
             }
         }
-        FormPage { groups: bridge.schema.answers }
-        FormPage { groups: bridge.schema.notification }
+        FormPage { objectName: "answersScroll"; groups: bridge.schema.answers }
+        FormPage { objectName: "notificationScroll"; groups: bridge.schema.notification }
     }
     Dialog {
         id: bankConfirm; property string providerKey: ""

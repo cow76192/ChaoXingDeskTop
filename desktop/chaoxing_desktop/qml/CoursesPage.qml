@@ -110,23 +110,7 @@ ColumnLayout {
         model: bridge.courseRows
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: ScrollBar {}
-        WheelHandler {
-            target: null
-            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-            onWheel: function(event) {
-                // Keep precise touchpad deltas; mouse steps are 15% below 0.3.6.
-                const delta = event.pixelDelta.y !== 0 ? event.pixelDelta.y : event.angleDelta.y / 120 * 136
-                if (delta === 0) {
-                    event.accepted = false
-                    return
-                }
-                courseList.cancelFlick()
-                const top = courseList.originY
-                const bottom = top + Math.max(0, courseList.contentHeight - courseList.height)
-                courseList.contentY = Math.max(top, Math.min(bottom, courseList.contentY - delta))
-                event.accepted = true
-            }
-        }
+        PageWheelHandler { scrollTarget: courseList }
         delegate: Rectangle {
             required property var modelData
             required property int index

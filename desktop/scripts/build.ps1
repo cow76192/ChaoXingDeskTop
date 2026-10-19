@@ -29,6 +29,8 @@ foreach ($taskUiTest in @('qml_ui_smoke.py', 'accounts_ui_smoke.py', 'audit_ui_s
     & $taskPython (Join-Path 'tests' $taskUiTest)
     if ($LASTEXITCODE -ne 0) { throw "Source UI acceptance failed: $taskUiTest" }
 }
+& $taskPython tests/services_media_smoke.py build/services-media-smoke
+if ($LASTEXITCODE -ne 0) { throw 'Service scrolling and media UI acceptance failed' }
 $taskOutput = [System.IO.Path]::GetFullPath((Join-Path $taskRoot $OutputDirectory))
 $taskDistRoot = [System.IO.Path]::GetFullPath((Join-Path $taskRoot 'dist')) + [System.IO.Path]::DirectorySeparatorChar
 if (-not $taskOutput.StartsWith($taskDistRoot, [System.StringComparison]::OrdinalIgnoreCase)) {

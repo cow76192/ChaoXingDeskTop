@@ -8,6 +8,7 @@ ScrollView {
     property bool migration: false
     clip: true
     contentWidth: availableWidth
+    PageWheelHandler { parent: page.contentItem; scrollTarget: page.contentItem }
     ColumnLayout {
         width: page.availableWidth
         spacing: 18
