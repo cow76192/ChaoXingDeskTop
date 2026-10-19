@@ -1,8 +1,8 @@
 # 桌面版使用与开发指南
 
-**版本：0.3.6** · Windows 10 / 11 x64 · Python + PySide6 / QML · GPL-3.0
+**版本：0.3.7** · Windows 10 / 11 x64 · Python + PySide6 / QML · GPL-3.0
 
-[项目首页](../README.md) · [下载安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/tag/v0.3.6) · [第三方声明](THIRD_PARTY_NOTICES.md)
+[项目首页](../README.md) · [下载安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/tag/v0.3.7) · [第三方声明](THIRD_PARTY_NOTICES.md)
 
 本文中的命令默认在 `desktop` 目录的 PowerShell 中执行。
 
@@ -110,32 +110,39 @@ python -m venv .venv-build
 ### 构建程序
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -OutputDirectory dist/release-0.3.6/ChaoxingDesktop
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -OutputDirectory dist/release-0.3.7/ChaoxingDesktop
 ```
 
 构建脚本会准备 `.venv-build`、安装锁定依赖并核对依赖闭包，随后运行单元与源码界面回归、执行 PyInstaller，最后验收冻结 worker 与 QML 界面。
 
-程序输出至 `dist/release-0.3.6/ChaoxingDesktop/`。可通过 `-Wheelhouse <绝对路径>` 使用完整的本地 wheel 目录离线安装。依赖更新需要重新生成、审阅锁文件，并在干净环境中验证。
+程序输出至 `dist/release-0.3.7/ChaoxingDesktop/`。可通过 `-Wheelhouse <绝对路径>` 使用完整的本地 wheel 目录离线安装。依赖更新需要重新生成、审阅锁文件，并在干净环境中验证。
 
 ### 生成安装包
 
 准备 [NSIS 编译器](https://nsis.sourceforge.io/Download)，将下方路径替换为本机的 `makensis.exe`：
 
 ```powershell
-.venv-build/Scripts/python.exe scripts/build_installer.py --app dist/release-0.3.6/ChaoxingDesktop --compiler "C:/Tools/NSIS/makensis.exe"
+.venv-build/Scripts/python.exe scripts/build_installer.py --app dist/release-0.3.7/ChaoxingDesktop --compiler "C:/Tools/NSIS/makensis.exe"
 ```
 
 产物默认写入项目根目录的 `release/`：
 
 ```text
-ChaoxingDesktop-0.3.6-Setup-win-x64.exe
-ChaoxingDesktop-0.3.6-source.zip
-ChaoxingDesktop-0.3.6-installer-SHA256.json
+ChaoxingDesktop-0.3.7-Setup-win-x64.exe
+ChaoxingDesktop-0.3.7-source.zip
+ChaoxingDesktop-0.3.7-installer-SHA256.json
 ```
 
 安装包包含完整程序、对应源码 ZIP、许可和第三方声明，NSIS 编译器不随包分发。生成安装包前会核对程序版本、源码与产物哈希，以及单元、worker、GUI 验收标记；跳过 GUI 的构建不能用于正式发布。修改构建输入后，需要重新构建和验收。
 
 安装器与便携打包共用 `scripts/source_bundle.py` 的公共文件清单，不收集历史计划、截图、验收文档、用户数据或临时文件。升级时只删除 `scripts/retired-runtime-0.3.5.txt` 列出的具体废弃运行文件，不使用通配符或递归删除，也不删除新程序仍包含的文件。
+
+## 0.3.7 音频修复与清理
+
+- 课程列表鼠标滚轮从 160 调整为 136 像素/格，降低 15%；触控板像素滚动和边界限制保持原样。
+- 按播放器模块与旧卡片文件名正确识别 MP3 等音频，状态读取与进度上报均使用音频类型；网络错误不再触发无依据的音频切换。
+- 文档、阅读和媒体状态需通过响应校验；每张任务卡保留自己的参数，JSON 解析保留原始空格，未知任务不再静默丢弃。
+- 移除桌面路由不再使用的旧选项模糊匹配、答案分段代码及模块，删除无用导入并让测试直接替换实际等待函数。未新增依赖。
 
 ## 0.3.6 修复与清理
 

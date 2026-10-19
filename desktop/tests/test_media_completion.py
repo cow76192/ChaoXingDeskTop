@@ -31,6 +31,9 @@ class MediaCompletionTests(unittest.TestCase):
         client = Chaoxing()
         client.desktop_media_progress = Mock()
         session = Mock()
+        session.get.return_value.status_code = 200
+        session.get.return_value.text = '{}'
+        session.get.return_value.url = 'https://mooc1.chaoxing.com/ananas/status/o'
         session.get.return_value.json.return_value = dict(status='success', dtoken='t', duration=duration)
         reports = []
 

@@ -136,7 +136,7 @@ with tempfile.TemporaryDirectory() as directory:
         QTest.qWait(100)
         course_list.setProperty('contentY', course_list.property('originY'))
         wheel(course_list, angle=-120)
-        assert course_list.property('contentY') - course_list.property('originY') >= 140
+        assert abs(course_list.property('contentY') - course_list.property('originY') - 136) < 1
         before = course_list.property('contentY')
         wheel(course_list, pixels=-23)
         assert abs(course_list.property('contentY') - before - 23) < 1

@@ -48,6 +48,9 @@ class AdapterRegressions(unittest.TestCase):
         client = Chaoxing()
         client.desktop_media_progress = Mock()
         session = Mock()
+        session.get.return_value.status_code = 200
+        session.get.return_value.text = '{}'
+        session.get.return_value.url = 'https://mooc1.chaoxing.com/ananas/status/o'
         session.get.return_value.json.return_value = dict(status='success', dtoken='t', crc='c', key='k', duration=60)
         with patch.object(SessionManager, 'get_session', return_value=session), \
                 patch.object(client, 'get_fid', return_value='f'), \
@@ -79,6 +82,9 @@ class AdapterRegressions(unittest.TestCase):
         clock = MediaClock()
         client = Chaoxing()
         session = Mock()
+        session.get.return_value.status_code = 200
+        session.get.return_value.text = '{}'
+        session.get.return_value.url = 'https://mooc1.chaoxing.com/ananas/status/o'
         session.get.return_value.json.return_value = dict(status="success", dtoken="t", crc="c", key="k", duration=1)
         with patch.object(SessionManager, "get_session", return_value=session), \
                 patch.object(client, "get_fid", return_value="f"), \
@@ -95,6 +101,9 @@ class AdapterRegressions(unittest.TestCase):
         clock = MediaClock()
         client = Chaoxing()
         session = Mock()
+        session.get.return_value.status_code = 200
+        session.get.return_value.text = '{}'
+        session.get.return_value.url = 'https://mooc1.chaoxing.com/ananas/status/o'
         session.get.return_value.json.return_value = dict(status="success", dtoken="t", crc="c", key="k", duration=1)
         with patch.object(SessionManager, "get_session", return_value=session), \
                 patch.object(client, "get_fid", return_value="f"), \
@@ -109,7 +118,7 @@ class AdapterRegressions(unittest.TestCase):
         live = Mock()
         live.get_status.return_value = {"temp": {"data": {"duration": 60}}}
         live.do_finish.return_value = False
-        with patch("api.live_process.time.sleep"):
+        with patch("api.live_process.wait"):
             self.assertFalse(LiveProcessor.run_live(live))
         self.assertEqual(live.do_finish.call_count, 2)
 

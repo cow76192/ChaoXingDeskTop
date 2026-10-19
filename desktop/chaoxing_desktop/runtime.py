@@ -3,8 +3,9 @@ from enum import Enum
 import threading
 
 from api.base import Account, Chaoxing, StudyResult
+from api.decode import attachment_kind
 from api.logger import logger
-from api.notification import Notification
+from api.notification import Notification as Notification  # Exported for worker completion notifications.
 from .answers import build_answers
 from .control import checkpoint, control_of
 
@@ -38,16 +39,16 @@ def create_client(config, channel, courses_only=False):
 
 def process_job(client, course, job, info, speed):
     checkpoint(client)
+    info = job.get('_job_info', info)
     kind = job["type"]
+    if kind == 'video' and attachment_kind(job) == 'audio':
+        kind = 'audio'
     if kind == 'audio':
         return client.study_video(course, job, info, _speed=speed, _type='Audio')
     if kind == "video":
-        result = client.study_video(course, job, info, _speed=speed, _type="Video")
-        if result in (StudyResult.FORBIDDEN, StudyResult.VERIFICATION_REQUIRED, StudyResult.TIMEOUT):
-            return result
-        return client.study_video(course, job, info, _speed=speed, _type="Audio") if result.is_failure() else result
+        return client.study_video(course, job, info, _speed=speed, _type="Video")
     if kind == "document":
-        return client.study_document(course, job)
+        return client.study_document(course, job, info)
     if kind == "read":
         return client.study_read(course, job, info)
     if kind == "workid":

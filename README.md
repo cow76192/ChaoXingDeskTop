@@ -2,17 +2,17 @@
 
 面向 Windows 的超星课程学习工作台，用一个桌面窗口管理账号、课程、章节任务、题库与 AI 服务，以及逐题结果和日志。
 
-**当前版本：0.3.6** · **Windows 10 / 11 x64** · **Python + PySide6 / QML** · **GPL-3.0**
+**当前版本：0.3.7** · **Windows 10 / 11 x64** · **Python + PySide6 / QML** · **GPL-3.0**
 
-[下载安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.6/ChaoxingDesktop-0.3.6-Setup-win-x64.exe) · [发行说明](https://github.com/mikubob/ChaoXingDeskTop/releases/tag/v0.3.6) · [使用与构建指南](desktop/README.md) · [第三方声明](desktop/THIRD_PARTY_NOTICES.md)
+[下载安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.7/ChaoxingDesktop-0.3.7-Setup-win-x64.exe) · [发行说明](https://github.com/mikubob/ChaoXingDeskTop/releases/tag/v0.3.7) · [使用与构建指南](desktop/README.md) · [第三方声明](desktop/THIRD_PARTY_NOTICES.md)
 
 ## 下载与安装
 
 | 文件 | 用途 |
 | --- | --- |
-| [Windows x64 安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.6/ChaoxingDesktop-0.3.6-Setup-win-x64.exe) | 日常使用，已包含 Python 运行环境 |
-| [对应版本源码](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.6/ChaoxingDesktop-0.3.6-source.zip) | 查看实现、自行运行或构建 |
-| [SHA256 校验清单](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.6/ChaoxingDesktop-0.3.6-installer-SHA256.json) | 核对安装包及源码 ZIP 的完整性 |
+| [Windows x64 安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.7/ChaoxingDesktop-0.3.7-Setup-win-x64.exe) | 日常使用，已包含 Python 运行环境 |
+| [对应版本源码](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.7/ChaoxingDesktop-0.3.7-source.zip) | 查看实现、自行运行或构建 |
+| [SHA256 校验清单](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.7/ChaoxingDesktop-0.3.7-installer-SHA256.json) | 核对安装包及源码 ZIP 的完整性 |
 
 下载并运行安装包，按提示完成安装后，从桌面或开始菜单打开「超星桌面版」。首次使用可以直接选择「离线演示」，体验界面和任务流程。
 
@@ -41,6 +41,13 @@
 题库按顺序查询，AI 补全未解决的题目，启用人工补全后可继续处理剩余答案。随机补全默认关闭。
 
 默认只保存答案。自动提交需要独立开启，并要求所有题目已有答案；仍有空白题目时仅保存。
+
+## 0.3.7 更新
+
+- 课程列表鼠标滚轮步幅在 0.3.6 基础上降低 **15%**（160 → 136 像素/格），保留触控板精细滚动和列表边界限制。
+- 修复部分 MP3 等音频被当作视频上报的问题，补全播放器模块与旧任务卡的音频识别，统一音频请求类型和界面标签。
+- 文档、阅读和媒体状态接口校验平台实际返回结果，避免将登录页、验证页、业务失败或无效响应当作成功；修复多任务卡参数串用与文件名空格丢失。
+- 删除已被桌面答题路由替代的旧模糊匹配、答案分段模块和无用导入，清理失效测试补丁；保留当前答案核验、账号会话和配置迁移行为。未新增运行依赖。
 
 ## 0.3.6 更新
 

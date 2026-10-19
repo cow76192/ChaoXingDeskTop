@@ -3,7 +3,6 @@
 - `__init__.py`: 平台协议适配包
 - `base.py`: 提供核心功能，包含主要的Chaoxing类和学习功能
 - `answer.py`: 仅提供 GO、言溪、LIKE、Adapter 的协议适配；桌面答题策略与 AI 位于 chaoxing_desktop/answers.py
-- `answer_check.py`: 答案文本分段；答案校验由桌面端 answers.py 负责
 - `cipher.py`: AES加密解密功能
 - `config.py`: 全局配置常量
 - `cookies.py`: Cookie管理

@@ -1,4 +1,3 @@
-import time
 from chaoxing_desktop.control import checkpoint, wait
 
 from api.live import Live

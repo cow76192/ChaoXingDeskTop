@@ -211,6 +211,9 @@ class CaptchaRecoveryTests(unittest.TestCase):
 
     def test_initial_media_report_uses_recorded_position_and_stops_on_verification(self):
         client, session = Chaoxing(), Mock()
+        session.get.return_value.status_code = 200
+        session.get.return_value.text = '{}'
+        session.get.return_value.url = 'https://mooc1.chaoxing.com/ananas/status/o'
         session.get.return_value.json.return_value = dict(status='success', dtoken='t', crc='c', key='k', duration=60)
         with patch.object(SessionManager, 'get_session', return_value=session), patch.object(client, 'get_fid', return_value='f'), patch.object(client, 'video_progress_log', return_value=(False, 428)) as progress:
             self.assertEqual(client.study_video({}, dict(objectid='o', playTime=15000, name='video'), {}), StudyResult.VERIFICATION_REQUIRED)

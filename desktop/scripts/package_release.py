@@ -1,5 +1,4 @@
 """Package only public source and built artifacts; never include user data."""
-import hashlib
 import json
 from pathlib import Path
 import shutil

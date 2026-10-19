@@ -13,7 +13,7 @@ def pkcs7_padding(s, block_size=16):
 
 def split_to_data_blocks(byte_str, block_size=16):
     length = len(byte_str)
-    j, y = divmod(length, block_size)
+    j = length // block_size
     blocks = []
     shenyu = j * block_size
     for i in range(j):

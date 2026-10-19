@@ -114,8 +114,8 @@ ColumnLayout {
             target: null
             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
             onWheel: function(event) {
-                // Keep precise touchpad deltas; move roughly two cards per mouse notch.
-                const delta = event.pixelDelta.y !== 0 ? event.pixelDelta.y : event.angleDelta.y / 120 * 160
+                // Keep precise touchpad deltas; mouse steps are 15% below 0.3.6.
+                const delta = event.pixelDelta.y !== 0 ? event.pixelDelta.y : event.angleDelta.y / 120 * 136
                 if (delta === 0) {
                     event.accepted = false
                     return

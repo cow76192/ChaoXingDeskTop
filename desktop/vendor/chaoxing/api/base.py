@@ -5,7 +5,6 @@ import secrets
 import re
 import threading
 import time
-from difflib import SequenceMatcher
 from enum import Enum
 from hashlib import md5
 from typing import Optional, Literal
@@ -20,7 +19,6 @@ from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception
 from chaoxing_desktop.control import checkpoint, wait as controlled_wait
 from api.responses import checked_page, PlatformResponseError
 from api.answer import Tiku
-from api.answer_check import cut
 from api.cipher import AESCipher
 from api.config import GlobalConst as gc
 from api.cookies import save_cookies, use_cookies
@@ -35,6 +33,34 @@ from api.decode import (
 
 def get_timestamp():
     return str(int(time.time() * 1000))
+
+
+def resource_json(response):
+    """Resource endpoints must return JSON, never a login/verification page."""
+    try:
+        from api.captcha import is_captcha_response
+        if is_captcha_response(response):
+            raise PlatformResponseError('平台要求人工验证。', 'verification_required')
+        checked_page(response, 'cards')
+        try:
+            data = response.json()
+        except ValueError:
+            raise PlatformResponseError('资源接口未返回有效 JSON。') from None
+        if not isinstance(data, dict):
+            raise PlatformResponseError('资源接口返回的数据结构异常。')
+        return data
+    finally:
+        response.close()
+
+
+def resource_failure(error):
+    logger.warning('资源任务处理失败：{}', error)
+    if isinstance(error, PlatformResponseError):
+        if error.kind == 'verification_required':
+            return StudyResult.VERIFICATION_REQUIRED
+        if error.kind == 'auth_error':
+            return StudyResult.FORBIDDEN
+    return StudyResult.ERROR
 
 
 class SessionManager:
@@ -126,85 +152,6 @@ class StudyResult(Enum):
 
     def is_failure(self):
         return self != StudyResult.SUCCESS
-
-
-def multi_cut(answer: str, origin_html_content="", logger=logger):
-    """
-    将多选题答案字符串按特定字符进行切割, 并返回切割后的答案列表
-    """
-    res = cut(answer)
-    if res is None:
-        logger.warning(
-            f"未能从网页中提取题目信息, 以下为相关信息：\n\t{answer}\n\n{origin_html_content}\n"
-        )
-        logger.warning("未能正确提取题目选项信息! 请反馈并提供以上信息")
-        return None
-    else:
-        return res
-
-
-def clean_res(res):
-    cleaned_res = []
-    if isinstance(res, str):
-        res = [res]
-    for c in res:
-        # 仅在字符串长度大于1时才尝试去除开头的字母编号，防止误删单个字母答案
-        cleaned = re.sub(r'^[A-Za-z]\s*[.、:：)?）]?\s*|[.,!?;:，。！？；：]', '', c) if len(c) > 1 else c
-        cleaned_res.append(cleaned.strip())
-    return cleaned_res
-
-
-def normalize_text(text: str) -> str:
-    if not isinstance(text, str):
-        text = str(text)
-    # 统一常见异体字符，降低“风/⻛”类差异导致的匹配失败。
-    char_map = str.maketrans({
-        '⻛': '风',
-        '⻔': '门',
-        '⻋': '车',
-        '⻢': '马',
-    })
-    normalized = text.translate(char_map)
-    normalized = re.sub(r'^[A-Za-z]\s*[.、:：)?）]?\s*', '', normalized)
-    normalized = re.sub(r'\s+', '', normalized)
-    normalized = re.sub(r'[，。！？；：,.!?;:()（）\[\]【】"“”‘’\-_/\\|]', '', normalized)
-    return normalized.lower()
-
-
-def get_option_text(option: str) -> str:
-    return re.sub(r'^[A-Za-z]\s*[.、:：)?）]?\s*', '', option).strip()
-
-
-def best_option_by_similarity(target: str, options: list, threshold: float = 0.8) -> str:
-    if not target or not options:
-        return ""
-    target_norm = normalize_text(target)
-    if not target_norm:
-        return ""
-
-    best_letter = ""
-    best_score = 0.0
-    for option in options:
-        option_text = get_option_text(option)
-        option_norm = normalize_text(option_text)
-        if not option_norm:
-            continue
-        score = SequenceMatcher(None, target_norm, option_norm).ratio()
-        if score > best_score:
-            best_score = score
-            best_letter = option[:1]
-
-    if best_score >= threshold:
-        logger.info(f"相似度兜底匹配成功: {best_letter} (score={best_score:.2f}, threshold={threshold:.2f})")
-        return best_letter
-    return ""
-
-
-def is_subsequence(a, o):
-    iter_o = iter(o.lower())
-    return all(c in iter_o for c in a.lower())
-
-
 
 
 def _parse_work_record_list(html_text: str) -> list[tuple[int, float]]:
@@ -519,6 +466,8 @@ class Chaoxing:
                 logger.info("该章节未开放")
                 return [], _job_info
 
+            for job in _job_list:
+                job['_job_info'] = dict(_job_info)
             job_list += _job_list
             job_info.update(_job_info)
 
@@ -588,9 +537,9 @@ class Chaoxing:
             f"{_dtoken}"
         )
 
-        face_capture_enc = _job["videoFaceCaptureEnc"]
-        att_duration = _job["attDuration"]
-        att_duration_enc = _job["attDurationEnc"]
+        face_capture_enc = _job.get("videoFaceCaptureEnc")
+        att_duration = _job.get("attDuration")
+        att_duration_enc = _job.get("attDurationEnc")
 
         if face_capture_enc:
             params["videoFaceCaptureEnc"] = face_capture_enc
@@ -613,7 +562,7 @@ class Chaoxing:
                     _session, ua, res, lambda: _session.get(_url, params=params, headers=headers), generation)
             return res
 
-        rt = _job['rt']
+        rt = _job.get('rt')
         if not rt:
             rt_search = re.search(r"-rt_([1d])", _job['otherinfo'])
             if rt_search:
@@ -633,9 +582,12 @@ class Chaoxing:
                     resp.close()
                     return False, 428
                 if resp.status_code == 200:
+                    _job['rt'] = rt
                     break
                 elif resp.status_code == 403:
                     logger.warning("出现403报错, 正常尝试切换rt")
+                    if rt != 1:
+                        resp.close()
                 else:
                     logger.warning("未知错误 jobid={}, status_code={}, 摘要:\n{}",
                                    _job.get("jobid"),
@@ -649,15 +601,15 @@ class Chaoxing:
 
         if resp.status_code == 200:
             try:
-                data = resp.json()
-                if not isinstance(data, dict) or not isinstance(data.get('isPassed'), bool):
+                data = resource_json(resp)
+                if not isinstance(data.get('isPassed'), bool):
                     raise ValueError
                 return data['isPassed'], 200
+            except PlatformResponseError as exc:
+                return False, {'auth_error': 403, 'verification_required': 428}.get(exc.kind, 502)
             except ValueError:
                 logger.warning('媒体上报响应不是有效的进度 JSON，未确认任务完成。')
                 return False, 502
-            finally:
-                resp.close()
 
         elif resp.status_code == 403:
             logger.debug(
@@ -667,7 +619,8 @@ class Chaoxing:
             )
 
             # 若出现两个rt参数都返回403的情况, 则跳过当前任务
-            logger.warning('媒体上报 HTTP 403，会话或权限仍未恢复。')
+            logger.warning('任务「{}」媒体上报 HTTP 403，类型={}，rt={}；会话或权限仍未恢复。',
+                           _job.get('name', ''), _type, _job.get('rt', rt))
             resp.close()
             return False, 403
 
@@ -679,32 +632,31 @@ class Chaoxing:
     def _refresh_video_status(self, session: requests.Session, job: dict, _type: Literal["Video", "Audio"]) \
             -> Optional[dict]:
         self.rate_limiter.limit_rate(random_time=True, random_max=0.2)
+        try:
+            return self._load_media_status(session, job, _type)
+        except (RequestException, PlatformResponseError) as exc:
+            if isinstance(exc, PlatformResponseError) and exc.kind == 'verification_required':
+                raise
+            logger.warning('刷新媒体状态失败：{}', exc)
+            return None
+
+    def _load_media_status(self, session, job, _type):
         headers = gc.VIDEO_HEADERS if _type == "Video" else gc.AUDIO_HEADERS
         info_url = (
             f"https://mooc1.chaoxing.com/ananas/status/{job['objectid']}?"
             f"k={self.get_fid()}&flag=normal"
         )
+        data = resource_json(session.get(info_url, timeout=8, headers=headers))
+        if data.get('status') != 'success':
+            raise PlatformResponseError('媒体尚未就绪，可能转码未完成、格式不支持或资源不可用。')
         try:
-            resp = session.get(info_url, timeout=8, headers=headers)
-        except RequestException as exc:
-            logger.debug("刷新视频状态失败: {}", exc)
-            return None
-
-        if resp.status_code != 200:
-            logger.debug("刷新视频状态返回码异常: {}" % resp.status_code)
-            logger.debug(resp.text)
-            return None
-
-        try:
-            data = resp.json()
-        except ValueError as exc:
-            logger.debug("解析视频状态响应失败: {}", exc)
-            return None
-
-        if data.get("status") == "success":
-            return data
-
-        return None
+            if isinstance(data.get('duration'), bool) or int(data['duration']) <= 0:
+                raise ValueError
+            if not isinstance(data.get('dtoken'), str) or not data['dtoken'].strip():
+                raise ValueError
+        except (KeyError, TypeError, ValueError, OverflowError):
+            raise PlatformResponseError('媒体缺少有效时长或上报令牌，保留待处理。') from None
+        return data
 
     def _recover_after_forbidden(self, session: requests.Session, job: dict, _type: Literal["Video", "Audio"]):
         SessionManager.update_cookies()
@@ -722,12 +674,12 @@ class Chaoxing:
         _session = SessionManager.get_session()
 
         headers = gc.VIDEO_HEADERS if _type == "Video" else gc.AUDIO_HEADERS
-        _info_url = f"https://mooc1.chaoxing.com/ananas/status/{_job['objectid']}?k={self.get_fid()}&flag=normal"
-        _video_info = _session.get(_info_url, headers=headers).json()
-
-        if _video_info["status"] != "success":
-            logger.error(f"Unknown status: {_video_info['status']}")
-            return StudyResult.ERROR
+        if self._captcha_recovery.blocked:
+            return StudyResult.VERIFICATION_REQUIRED
+        try:
+            _video_info = self._load_media_status(_session, _job, _type)
+        except (RequestException, PlatformResponseError) as exc:
+            return resource_failure(exc)
 
         _dtoken = _video_info["dtoken"]
 
@@ -744,8 +696,8 @@ class Chaoxing:
         last_iter = time.monotonic()
         next_report_at = last_iter
 
-        logger.info("开始任务: {}, 总时长: {}s, 已进行: {}s, 倍速: {}, 上报间隔: {}s",
-                    _job['name'], duration, play_time, _speed, report_interval)
+        logger.info("开始任务: {}, 类型: {}, 总时长: {}s, 已进行: {}s, 倍速: {}, 上报间隔: {}s",
+                    _job['name'], _type, duration, play_time, _speed, report_interval)
         def report_media(verified=False):
             callback = getattr(self, 'desktop_media_progress', None)
             if callback:
@@ -790,8 +742,11 @@ class Chaoxing:
                         "出现403报错, 正在尝试刷新会话状态 (第{}次)",
                         forbidden_retry,
                     )
-                    time.sleep(random.uniform(2, 4))
-                    refreshed_meta = self._recover_after_forbidden(_session, _job, _type)
+                    controlled_wait(self, random.uniform(2, 4), cancel_only=True)
+                    try:
+                        refreshed_meta = self._recover_after_forbidden(_session, _job, _type)
+                    except (RequestException, PlatformResponseError) as exc:
+                        return resource_failure(exc)
                     if refreshed_meta and refreshed_meta.get("dtoken") and refreshed_meta.get(
                             "duration") is not None:
                         _dtoken = refreshed_meta["dtoken"]
@@ -836,7 +791,7 @@ class Chaoxing:
             report_media()
             controlled_wait(self, gc.THRESHOLD, cancel_only=True)
 
-    def study_document(self, _course, _job) -> StudyResult:
+    def study_document(self, _course, _job, _job_info=None) -> StudyResult:
         """
         Study a document in Chaoxing platform.
 
@@ -860,13 +815,32 @@ class Chaoxing:
             - get_timestamp(): To get current timestamp
             - re module for regular expression matching
         """
-        _session = SessionManager.get_session()
-        _url = f"https://mooc1.chaoxing.com/ananas/job/document?jobid={_job['jobid']}&knowledgeid={re.findall(r'nodeId_(.*?)-', _job['otherinfo'])[0]}&courseid={_course['courseId']}&clazzid={_course['clazzId']}&jtoken={_job['jtoken']}&_dc={get_timestamp()}"
-        _resp = _session.get(_url)
-        if _resp.status_code != 200:
+        node = re.search(r'nodeId_([^-&]+)', _job.get('otherinfo', ''))
+        knowledgeid = (_job_info or {}).get('knowledgeid') or _job.get('knowledgeid') or (node.group(1) if node else '')
+        if not knowledgeid:
+            logger.warning('文档任务缺少章节 ID，保留待处理。')
             return StudyResult.ERROR
-        else:
+        return self._study_resource('document', _course, _job, knowledgeid)
+
+    def _study_resource(self, endpoint, course, job, knowledgeid):
+        checkpoint(self)
+        if self._captcha_recovery.blocked:
+            return StudyResult.VERIFICATION_REQUIRED
+        if not job.get('jobid') or not job.get('jtoken') or not knowledgeid:
+            logger.warning('资源任务缺少任务 ID、章节 ID 或访问令牌，保留待处理。')
+            return StudyResult.ERROR
+        try:
+            data = resource_json(SessionManager.get_session().get(
+                f'https://mooc1.chaoxing.com/ananas/job/{endpoint}',
+                params={'jobid': job['jobid'], 'knowledgeid': knowledgeid,
+                        'courseid': course['courseId'], 'clazzid': course['clazzId'],
+                        'jtoken': job['jtoken'], '_dc': get_timestamp()}))
+        except (RequestException, PlatformResponseError) as exc:
+            return resource_failure(exc)
+        if data.get('status') is True:
             return StudyResult.SUCCESS
+        logger.warning('资源任务接口未确认成功，保留待核验。')
+        return StudyResult.ERROR
 
     def study_work(self, _course, _job, _job_info) -> StudyResult:
         checkpoint(self)
@@ -914,7 +888,7 @@ class Chaoxing:
             questions = decode_questions_info(_resp.text)
 
             if _resp.status_code == 200 and questions.get("questions"):
-                return _resp, questions
+                return questions
 
             logger.warning(
                 f"无效响应 (Code: {getattr(_resp, 'status_code', 'Unknown')}), 重试中...")
@@ -941,10 +915,9 @@ class Chaoxing:
                 time.sleep(2)
 
             # 1. 获取题目
-            final_resp = {}
             questions = {}
             try:
-                final_resp, questions = fetch_response_with_retry()
+                questions = fetch_response_with_retry()
             except PermissionError as e:
                 logger.warning(f"跳过章节检测: {e}")
                 return StudyResult.SUCCESS
@@ -955,8 +928,6 @@ class Chaoxing:
                 else:
                     logger.error(f"获取章节检测题目失败, 达到最大重试次数: {e}")
                 return StudyResult.ERROR
-
-            _ORIGIN_HTML_CONTENT = final_resp.text  # 用于配合输出网页源码, 帮助修复#391错误
 
             # 2. 设置上一轮错误反馈（供AI重新作答时参考）
             if feedback_history and hasattr(self.tiku, 'set_work_feedback'):
@@ -976,7 +947,7 @@ class Chaoxing:
             answers = self.tiku.query_all(questions["questions"], query_delay=query_delay)
 
             if not isinstance(answers, list):
-                logger.error("题库 query_all 返回的数据格式异常，期望列表。将采用随机答案答题")
+                logger.error("题库 query_all 返回的数据格式异常，期望列表；本轮答案保留为空。")
                 answers = [None] * total_questions
             elif len(answers) != total_questions:
                 logger.error(
@@ -993,42 +964,10 @@ class Chaoxing:
                     q[f'answerSource{q["id"]}'] = "missing"
                 else:
                     # 根据响应结果选择答案
-                    if q["type"] in ("single", "multiple") and hasattr(self.tiku, "choice_letters"):
+                    if q["type"] in ("single", "multiple"):
                         # The desktop router already validated the exact options.
                         # Fuzzy rematching can change B into A for overlapping text.
                         answer = self.tiku.choice_letters(res, q)
-                    elif q["type"] == "multiple":
-                        # 多选处理
-                        options_list = multi_cut(q["options"], _ORIGIN_HTML_CONTENT)
-                        res_list = multi_cut(res, _ORIGIN_HTML_CONTENT)
-                        if res_list is not None and options_list is not None:
-                            for _a in clean_res(res_list):
-                                matched = False
-                                for o in options_list:
-                                    if (
-                                            is_subsequence(_a, o)  # 去掉各种符号和前面ABCD的答案应当是选项的子序列
-                                    ):
-                                        answer += o[:1]
-                                        matched = True
-                                        break  # 找到匹配项后立即停止，防止重复添加
-                                if not matched:
-                                    best_letter = best_option_by_similarity(_a, options_list, threshold=0.8)
-                                    if best_letter:
-                                        answer += best_letter
-                            # 对答案进行排序, 否则会提交失败
-                            answer = "".join(sorted(set(answer)))
-                        # else 如果分割失败那么就直接到下面去随机选
-                    elif q["type"] == "single":
-                        # 单选也进行切割，主要是防止返回的答案有异常字符
-                        options_list = multi_cut(q["options"], _ORIGIN_HTML_CONTENT)
-                        if options_list is not None:
-                            t_res = clean_res(res)
-                            for o in options_list:
-                                if is_subsequence(t_res[0], o):
-                                    answer = o[:1]
-                                    break
-                            if not answer and t_res:
-                                answer = best_option_by_similarity(t_res[0], options_list, threshold=0.8)
                     elif q["type"] == "judgement":
                         answer = "true" if self.tiku.judgement_select(res) else "false"
                     elif q["type"] == "completion":
@@ -1366,24 +1305,7 @@ class Chaoxing:
         """
         阅读任务学习, 仅完成任务点, 并不增长时长
         """
-        _session = SessionManager.get_session()
-        _resp = _session.get(
-            url="https://mooc1.chaoxing.com/ananas/job/readv2",
-            params={
-                "jobid": _job["jobid"],
-                "knowledgeid": _job_info["knowledgeid"],
-                "jtoken": _job["jtoken"],
-                "courseid": _course["courseId"],
-                "clazzid": _course["clazzId"],
-            },
-        )
-        if _resp.status_code != 200:
-            logger.error(f"阅读任务学习失败 -> [{_resp.status_code}]{_resp.text}")
-            return StudyResult.ERROR
-        else:
-            _resp_json = _resp.json()
-            logger.info(f"阅读任务学习 -> {_resp_json['msg']}")
-            return StudyResult.SUCCESS
+        return self._study_resource('readv2', _course, _job, _job_info.get('knowledgeid'))
 
     def _send_monitor_heartbeat(self, course, point):
         """

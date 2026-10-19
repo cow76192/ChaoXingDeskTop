@@ -7,6 +7,7 @@
 """
 import json
 import re
+from urllib.parse import unquote, urlsplit
 from typing import List, Dict, Tuple, Any, Optional
 
 from bs4 import BeautifulSoup, NavigableString
@@ -171,12 +172,12 @@ def decode_course_card(html_text: str) -> Tuple[List[Dict[str, Any]], Dict[str, 
         return [], {"notOpen": True}
 
     # 提取mArg参数
-    temp = re.findall(r"mArg=\{(.*?)\};", html_text.replace(" ", ""))
-    if not temp:
+    assignment = re.search(r"\bmArg\s*=\s*(?=\{)", html_text)
+    if not assignment:
         return [], {}
 
     # 解析JSON数据
-    cards_data = json.loads("{" + temp[0] + "}")
+    cards_data, _ = json.JSONDecoder().raw_decode(html_text[assignment.end():])
 
     if not cards_data:
         return [], {}
@@ -229,7 +230,7 @@ def _process_attachment_cards(cards: List[Dict[str, Any]]) -> List[Dict[str, Any
     """
     job_list = []
 
-    for index, card in enumerate(cards):
+    for card in cards:
         # 跳过已通过的任务
         if card.get("isPassed", False):
             continue
@@ -250,7 +251,7 @@ def _process_attachment_cards(cards: List[Dict[str, Any]]) -> List[Dict[str, Any
             logger.trace(f"New info: {card['otherInfo']}")
 
         # 多维度判断是否为直播任务
-        card_type = card.get("type", "").lower()
+        card_type = attachment_kind(card)
         property_data = card.get("property", {})
         prop_type = property_data.get("type", "").lower()
         resource_type = property_data.get("resourceType", "").lower()
@@ -275,22 +276,49 @@ def _process_attachment_cards(cards: List[Dict[str, Any]]) -> List[Dict[str, Any
         elif card_type in ("video", "audio"):
             video_job = _process_video_task(card)
             if video_job:
-                if card_type == 'audio' or prop_type == 'audio' or resource_type == 'audio':
-                    video_job['type'] = 'audio'
+                video_job['type'] = card_type
                 job_list.append(video_job)
         elif card_type == "document":
             doc_job = _process_document_task(card)
             if doc_job:
                 job_list.append(doc_job)
+        elif card_type == 'read':
+            read_job = _process_read_task(card)
+            if read_job:
+                job_list.append(read_job)
         elif card_type == "workid":
             work_job = _process_work_task(card)
             if work_job:
                 job_list.append(work_job)
         else:
             logger.warning(f"Unknown card type: {card_type}")
-            logger.warning(card)
+            # Retain unsupported task points so they cannot become an empty page.
+            job_list.append({'type': 'unsupported', 'jobid': card.get('jobid', ''),
+                             'name': property_data.get('name') or property_data.get('title') or card_type})
 
     return job_list
+
+
+def attachment_kind(card: Dict[str, Any]) -> str:
+    """Resolve player module first; legacy cards can call MP3 resources video."""
+    prop = card.get('property') or {}
+    modules = {'insertaudio': 'audio', 'insertvideo': 'video', 'insertdoc': 'document'}
+    module = str(prop.get('module') or card.get('module') or '').lower()
+    if module in modules:
+        return modules[module]
+    kinds = [str(value or '').lower() for value in
+             (card.get('type'), prop.get('type'), prop.get('resourceType'))]
+    if 'audio' in kinds:
+        return 'audio'
+    kind = kinds[0] or next((value for value in kinds[1:]
+                             if value in ('video', 'document', 'read', 'workid')), '')
+    if kind in ('video', ''):
+        name = prop.get('name') or card.get('name') or ''
+        path = unquote(urlsplit(str(name)).path).lower()
+        if path.endswith(('.mp3', '.m4a', '.aac', '.wav', '.flac', '.ogg', '.oga',
+                          '.opus', '.wma', '.amr', '.aiff')):
+            return 'audio'
+    return kind
 
 
 def _process_live_task(card: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -333,41 +361,40 @@ def _process_read_task(card: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     }
 
 
-def _process_video_task(card: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """处理视频类型任务"""
-    try:
-        is_audio = any(str(source).lower() == 'audio' for source in (
-            card.get('type'), card.get('property', {}).get('type'), card.get('property', {}).get('resourceType')))
-        return {
-            "type": "video",
-            "jobid": card.get("jobid", ""),
-            "name": card.get("property", {}).get("name", ""),
-            "otherinfo": card.get("otherInfo", ""),
-            "mid": card.get("mid", "") if is_audio else card["mid"],
-            "objectid": card.get("objectId", ""),
-            "aid": card.get("aid", ""),
-            "playTime": card.get("playTime", 0),
-            "rt": card.get("property", {}).get("rt", ""),
-            "attDuration": card.get("attDuration", ""),
-            "attDurationEnc": card.get("attDurationEnc", ""),
-            "videoFaceCaptureEnc": card.get("videoFaceCaptureEnc", ""),
-        }
-    except KeyError:
-        logger.warning("出现转码失败视频，已跳过...")
-        return None
+def _process_video_task(card: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract media metadata; missing mid alone does not imply transcode failure."""
+    prop = card.get('property', {})
+    return {
+        "type": attachment_kind(card),
+        "module": prop.get('module') or card.get('module', ''),
+        "jobid": card.get("jobid") or prop.get('_jobid') or prop.get('jobid', ''),
+        "name": prop.get("name") or prop.get('title', ''),
+        "otherinfo": card.get("otherInfo", ""),
+        "mid": card.get("mid", ""),
+        "objectid": card.get("objectId") or prop.get('objectid') or prop.get('objectId', ''),
+        "aid": card.get("aid", ""),
+        "playTime": card.get("playTime", 0),
+        "rt": prop.get("rt", ""),
+        "attDuration": card.get("attDuration", ""),
+        "attDurationEnc": card.get("attDurationEnc", ""),
+        "videoFaceCaptureEnc": card.get("videoFaceCaptureEnc", ""),
+    }
 
 
 def _process_document_task(card: Dict[str, Any]) -> Dict[str, Any]:
     """处理文档类型任务"""
+    prop = card.get('property', {})
     return {
         "type": "document",
-        "jobid": card.get("jobid", ""),
+        "jobid": card.get("jobid") or prop.get('_jobid') or prop.get('jobid', ''),
+        "name": prop.get('name') or prop.get('title', ''),
         "otherinfo": card.get("otherInfo", ""),
         "jtoken": card.get("jtoken", ""),
         "mid": card.get("mid", ""),
         "enc": card.get("enc", ""),
         "aid": card.get("aid", ""),
-        "objectid": card.get("property", {}).get("objectid", "")
+        "objectid": card.get("property", {}).get("objectid", ""),
+        "knowledgeid": card.get("knowledgeid", ""),
     }
 
 

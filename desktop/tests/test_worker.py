@@ -35,7 +35,7 @@ class WorkerTests(unittest.TestCase):
                 return Result.SUCCESS
             return Result.NOT_OPEN if key == "closed" else Result.ERROR
         tasks = [dict(id=key, title=key) for key in ("eventual", "closed", "failure")]
-        with patch("chaoxing_desktop.worker.time.sleep"):
+        with patch("chaoxing_desktop.worker.controlled_wait"):
             statuses = run_tasks(channel, tasks, process, {"jobs": 2, "retry_interval": 0.1, "notopen_action": "continue"}, Result)
         self.assertEqual(statuses, {"eventual": "processed", "closed": "skipped", "failure": "failed"})
         self.assertEqual(calls["failure"], 5)
