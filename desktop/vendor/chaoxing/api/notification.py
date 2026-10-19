@@ -3,9 +3,8 @@
 支持多种通知服务，如ServerChan、Qmsg和Bark。
 """
 
-import configparser
 from abc import ABC, abstractmethod
-from typing import Dict, Optional
+from typing import Dict
 
 import requests
 
@@ -18,11 +17,8 @@ class NotificationService(ABC):
     所有具体的通知服务类应继承此类并实现必要的方法。
     """
 
-    CONFIG_PATH = "config.ini"
-
     def __init__(self):
         """初始化通知服务"""
-        self.name = self.__class__.__name__
         self.url = ""
         self.tg_chat_id = ""
         self._conf = None
@@ -37,27 +33,8 @@ class NotificationService(ABC):
         """
         self._conf = config
 
-    def _load_config_from_file(self) -> Optional[Dict[str, str]]:
-        """
-        从配置文件中加载通知服务的配置
-        
-        Returns:
-            成功返回配置字典，失败返回None
-        """
-        try:
-            config = configparser.ConfigParser()
-            config.read(self.CONFIG_PATH, encoding="utf8")
-            return config['notification']
-        except (KeyError, FileNotFoundError):
-            logger.info("未找到notification配置，已忽略外部通知功能")
-            self.disabled = True
-            return None
-
     def init_notification(self) -> None:
-        """初始化通知服务，加载配置并进行必要的设置"""
-        if not self._conf:
-            self._conf = self._load_config_from_file()
-
+        """使用桌面端传入的配置初始化通知服务。"""
         if not self.disabled and self._conf:
             self._init_service()
 
@@ -108,7 +85,8 @@ class DefaultNotification(NotificationService):
             通知服务实例
         """
         if not self._conf:
-            self._conf = self._load_config_from_file()
+            self.disabled = True
+            return self
 
         if self.disabled:
             return self

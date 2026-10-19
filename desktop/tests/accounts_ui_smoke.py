@@ -8,7 +8,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 os.environ.setdefault('QSG_RHI_BACKEND', 'software')
-from PySide6.QtCore import QPointF, Qt, qInstallMessageHandler
+from PySide6.QtCore import QPoint, QPointF, Qt, qInstallMessageHandler
+from PySide6.QtGui import QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from shiboken6 import delete
@@ -85,6 +86,81 @@ with tempfile.TemporaryDirectory() as directory:
     QTest.qWait(80)
     assert b.summary['activeAccount'] == second['id']
     assert not b.courses and not b.selected
+
+    # The selected row must stay readable while another row is highlighted.
+    click('account_selector')
+    QTest.keyClick(window, Qt.Key_Home)
+    QTest.qWait(80)
+    selected_option = find('account_selector_option_1')
+    assert selected_option is not None and selected_option.property('selected')
+    assert find('account_selector_option_0').property('highlighted')
+
+    def luminance(color):
+        def linear(value):
+            return value / 12.92 if value <= .04045 else ((value + .055) / 1.055) ** 2.4
+        return sum(weight * linear(value) for weight, value in
+                   zip((.2126, .7152, .0722), (color.redF(), color.greenF(), color.blueF())))
+
+    for index in (0, 1):
+        option = find(f'account_selector_option_{index}')
+        foreground = luminance(option.property('contentItem').property('color'))
+        background = luminance(option.property('background').property('color'))
+        assert (max(foreground, background) + .05) / (min(foreground, background) + .05) >= 4.5
+    assert window.grabWindow().save(str(destination / '账号下拉选中.png'))
+    QTest.keyClick(window, Qt.Key_Escape)
+    assert b.summary['activeAccount'] == second['id'], 'Dismissal changed the account'
+    click('account_selector')
+    click('account_selector_option_0')
+    assert b.summary['activeAccount'] == first['id'], 'Popup click did not switch accounts'
+    selector.forceActiveFocus()
+    QTest.keyClick(window, Qt.Key_End)
+    QTest.qWait(80)
+
+    # Send real wheel events over cards, including a checkbox, at both sizes.
+    b.on_event(dict(type='courses', demo=False, courses=[
+        dict(courseId=str(index), clazzId='01', title=f'离线滚动课程 {index + 1}')
+        for index in range(30)]))
+    course_list = find('courseList')
+
+    def wheel(item, angle=0, pixels=0, x=100):
+        position = item.mapToScene(QPointF(x, item.height() / 2))
+        event = QWheelEvent(position, QPointF(window.mapToGlobal(position.toPoint())),
+                            QPoint(0, pixels), QPoint(0, angle), Qt.NoButton,
+                            Qt.NoModifier, Qt.NoScrollPhase, False)
+        QApplication.sendEvent(window, event)
+        QTest.qWait(40)
+
+    for width, height in [(1440, 900), (980, 700)]:
+        window.setWidth(width)
+        window.setHeight(height)
+        QTest.qWait(100)
+        course_list.setProperty('contentY', course_list.property('originY'))
+        wheel(course_list, angle=-120)
+        assert course_list.property('contentY') - course_list.property('originY') >= 140
+        before = course_list.property('contentY')
+        wheel(course_list, pixels=-23)
+        assert abs(course_list.property('contentY') - before - 23) < 1
+        wheel(course_list, angle=120000, x=30)
+        assert abs(course_list.property('contentY') - course_list.property('originY')) < 1
+        wheel(course_list, angle=-120000)
+        bottom = (course_list.property('originY') + course_list.property('contentHeight')
+                  - course_list.height())
+        assert abs(course_list.property('contentY') - bottom) < 1
+        wheel(course_list, angle=-120)
+        assert abs(course_list.property('contentY') - bottom) < 1
+        wheel(course_list, angle=120000)
+
+        click('courses_select_all')
+        assert b.summary['selectedCount'] == 30
+        click('courses_show_ids')
+        assert find('courses_show_ids').property('checked')
+        assert find('courses_show_ids').property('text') == '隐藏 ID'
+        assert window.grabWindow().save(str(destination / f'课程按钮与ID-{width}.png'))
+        click('courses_show_ids')
+        assert not find('courses_show_ids').property('checked')
+        click('courses_clear_selection')
+        assert b.summary['selectedCount'] == 0
+
     b.controller.active = True
     b.changed.emit()
     QTest.qWait(60)
@@ -104,4 +180,4 @@ with tempfile.TemporaryDirectory() as directory:
 qInstallMessageHandler(previous)
 meaningful = [message for message in warnings if not message.startswith('QFontDatabase:')]
 assert not meaningful, '\n'.join(meaningful)
-print('Multi-account UI passed: keyboard switching, account payload, course isolation, busy lock, add account, narrow/wide screenshots; no QML warnings.')
+print('Multi-account UI passed: account switching/isolation, readable popup selection, mouse and pixel wheel scrolling/bounds, selection and ID buttons, busy lock, narrow/wide screenshots; no QML warnings.')

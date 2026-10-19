@@ -7,6 +7,7 @@ Button {
     property string glyph: ""
     property bool subtle: false
     property color accent: ({connect: "#2563eb", execute: "#15803d", save: "#0f766e", test: "#7c3aed", danger: "#dc2626", warning: "#b45309", neutral: "#475569"})[tone] || "#475569"
+    readonly property bool filled: (!subtle && tone !== "neutral") || checked
     implicitHeight: 40
     implicitWidth: Math.max(72, contentItem.implicitWidth + 32)
     leftPadding: 16
@@ -20,21 +21,21 @@ Button {
             width: visible ? 16 : 0
             height: 16
             anchors.verticalCenter: parent.verticalCenter
-            source: visible ? "../../assets/icons/" + control.glyph + (control.subtle || control.tone === "neutral" ? "" : "-white") + ".svg" : ""
+            source: visible ? "../../assets/icons/" + control.glyph + (control.filled ? "-white" : "") + ".svg" : ""
             opacity: control.enabled ? 1 : .4
         }
         Text {
             text: control.text
             font.pixelSize: 13
             font.bold: true
-            color: !control.enabled ? "#8590a2" : control.subtle || control.tone === "neutral" ? control.accent : "white"
+            color: !control.enabled ? "#8590a2" : control.filled ? "white" : control.accent
             anchors.verticalCenter: parent.verticalCenter
         }
     }
     background: Rectangle {
         radius: 7
-        color: !control.enabled ? "#edf0f5" : control.down ? (control.subtle || control.tone === "neutral" ? "#dde5f0" : Qt.darker(control.accent, 1.15)) : control.subtle || control.tone === "neutral" ? (control.hovered ? "#e9eef6" : "#f4f6fa") : (control.hovered ? Qt.darker(control.accent, 1.08) : control.accent)
+        color: !control.enabled ? "#edf0f5" : control.filled ? (control.down ? Qt.darker(control.accent, 1.15) : control.hovered ? Qt.darker(control.accent, 1.08) : control.accent) : control.tone !== "neutral" ? Qt.tint("white", Qt.rgba(control.accent.r, control.accent.g, control.accent.b, control.down ? .2 : control.hovered ? .14 : .07)) : control.down ? "#dde5f0" : control.hovered ? "#e9eef6" : "#f4f6fa"
         border.width: control.activeFocus ? 2 : 1
-        border.color: control.activeFocus ? "#2563eb" : control.subtle || control.tone === "neutral" ? "#dce3ee" : "transparent"
+        border.color: !control.enabled ? "#dce3ee" : control.activeFocus ? "#2563eb" : control.tone !== "neutral" ? control.accent : "#dce3ee"
     }
 }

@@ -47,7 +47,7 @@ ColumnLayout {
             onTextEdited: bridge.setValue(field.spec.section, field.spec.key, text)
             background: Rectangle { radius: 6; color: edit.enabled ? "white" : "#f0f2f6"; border.color: field.invalidNumber ? "#dc2626" : edit.activeFocus ? "#2563eb" : "#94a3b8"; border.width: edit.activeFocus ? 2 : 1 }
         }
-        Basic.ComboBox {
+        ChoiceBox {
             id: choice
             objectName: "choice_" + field.spec.section + "_" + field.spec.key
             visible: field.spec.kind === "choice"
@@ -59,8 +59,6 @@ ColumnLayout {
             currentIndex: { for (let i = 0; i < field.spec.choices.length; i++) if (field.spec.choices[i].value === field.value) return i; return -1 }
             Accessible.name: field.spec.title
             onActivated: bridge.setValue(field.spec.section, field.spec.key, currentValue)
-            indicator: Text { text: "▾"; x: choice.width - width - 12; y: (choice.height - height) / 2; color: "#34435a"; font.pixelSize: 18 }
-            background: Rectangle { radius: 6; color: choice.enabled ? "white" : "#f0f2f6"; border.color: choice.activeFocus ? "#2563eb" : "#94a3b8"; border.width: choice.activeFocus ? 2 : 1 }
         }
         ActionButton { visible: field.spec.kind === "secret"; text: field.revealed ? "隐藏" : "显示"; onClicked: field.revealed = !field.revealed }
         ActionButton { visible: field.spec.kind === "directory"; text: "选择目录"; onClicked: bridge.chooseLogDirectory() }

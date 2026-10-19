@@ -236,7 +236,8 @@ def real(channel, command):
         if not uid or (row['uid'] and row['uid'] != uid):
             raise ValueError('平台会话与当前账号不一致，请重新登录或添加为其他账号。')
         save_cookies(session)
-        channel.send('session_ready', account_id=account_id, uid=uid)
+        channel.send('session_ready', account_id=account_id, uid=uid,
+                     cookie_mtime_ns=store.cookie_path(account_id).stat().st_mtime_ns)
     checkpoint(channel)
     courses = list({(str(c["courseId"]), str(c["clazzId"])): c for c in cx.get_course_list()}.values())
     if command["action"] == "courses":

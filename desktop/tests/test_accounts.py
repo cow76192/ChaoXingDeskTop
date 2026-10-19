@@ -8,6 +8,7 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
+import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'vendor/chaoxing'))
@@ -113,6 +114,114 @@ class AccountTests(unittest.TestCase):
         b.on_event(dict(type='session_ready', account_id=second, uid='wrong', run_id='stale'))
         self.assertEqual(b.account_store.get(second)['uid'], 'uid-b')
 
+    def test_verified_session_refresh_allows_another_course_after_stop_or_finish(self):
+        b = self.backend()
+        account_id = self.login(b, 'a', 'uid-a')
+        courses = [dict(courseId=str(index), clazzId='a', title=f'Course {index}') for index in (1, 2)]
+        b.on_event(dict(type='courses', demo=False, courses=courses))
+
+        def started(_command):
+            b.controller.run_id = uuid.uuid4().hex
+            b.controller.active, b.controller.stopping = True, False
+
+        for ending in ('stop', 'forced_stop', 'done', 'error'):
+            with self.subTest(ending=ending):
+                b.selectVisible(False)
+                b.selectCourse('1', 'a', True)
+                with patch.object(b.controller, 'start', side_effect=started) as start:
+                    b.startTasks()
+                self.assertTrue(start.called, b.message)
+                previous = b.course_identity
+                # Even unchanged cookies are encrypted/written again at worker login.
+                write_cookie(b.cookie_path(), read_cookie(b.cookie_path()))
+                stat = b.cookie_path().stat()
+                os.utime(b.cookie_path(), ns=(stat.st_atime_ns, previous[-1] + 1_000_000))
+                b.on_event(dict(type='session_ready', account_id=account_id, uid='uid-a',
+                                cookie_mtime_ns=b.cookie_path().stat().st_mtime_ns,
+                                run_id=b.controller.run_id))
+                self.assertNotEqual(b.identity(), previous)
+
+                if ending in ('stop', 'forced_stop'):
+                    with patch.object(b.controller.process, 'write'):
+                        b.stop()
+                    if ending == 'stop':
+                        b.on_event(dict(type='cancelled', message='Stopped'))
+                elif ending == 'done':
+                    b.on_event(dict(type='done', success=1, pending=0, failed=0, skipped=0))
+                else:
+                    b.on_event(dict(type='error', message='Synthetic chapter failure'))
+                b.controller._exit_code = 0 if ending == 'done' else 2
+                b.controller._finish()
+
+                b.selectVisible(False)
+                b.selectCourse('2', 'a', True)
+                with patch.object(b.controller, 'start') as start:
+                    b.startTasks()
+                self.assertTrue(start.called, b.message)
+                command = start.call_args.args[0]
+                self.assertEqual(command['action'], 'run')
+                self.assertEqual(command['selected'], [['2', 'a']])
+                self.assertEqual(command['account_id'], account_id)
+                self.assertEqual(command['account_uid'], 'uid-a')
+                self.assertTrue(command['config']['common']['use_cookies'])
+                self.assertEqual(b.courses, courses)
+
+    def test_unverified_cookie_or_login_changes_still_require_course_reload(self):
+        b = self.backend()
+        account_id = self.login(b, 'a', 'uid-a')
+        courses = b.courses
+
+        def started(_command):
+            b.controller.run_id = uuid.uuid4().hex
+            b.controller.active, b.controller.stopping = True, False
+
+        for change in ('idle', 'after_ready', 'stale_run', 'other_account', 'other_uid',
+                       'outdated_revision', 'missing_revision', 'changed_password'):
+            with self.subTest(change=change):
+                b.on_event(dict(type='courses', demo=False, courses=courses))
+                b.selectVisible(True)
+                baseline = b.course_identity
+                if change != 'idle':
+                    with patch.object(b.controller, 'start', side_effect=started) as start:
+                        b.startTasks()
+                    self.assertTrue(start.called, b.message)
+                write_cookie(b.cookie_path(), {'_uid': 'uid-a', 'session': 'ROTATED'})
+                stat = b.cookie_path().stat()
+                os.utime(b.cookie_path(), ns=(stat.st_atime_ns, baseline[-1] + 1_000_000))
+                event = dict(type='session_ready', account_id=account_id, uid='uid-a',
+                             cookie_mtime_ns=b.cookie_path().stat().st_mtime_ns,
+                             run_id=b.controller.run_id)
+                if change == 'stale_run':
+                    event['run_id'] = 'old-run'
+                elif change == 'other_account':
+                    event['account_id'] = uuid.uuid4().hex
+                elif change == 'other_uid':
+                    event['uid'] = 'uid-other'
+                elif change == 'outdated_revision':
+                    event['cookie_mtime_ns'] -= 1
+                elif change == 'missing_revision':
+                    del event['cookie_mtime_ns']
+                elif change == 'changed_password':
+                    b.config['common']['password'] = 'CHANGED_SECRET'
+                if change != 'idle':
+                    b.on_event(event)
+                    if change == 'after_ready':
+                        self.assertEqual(b.course_identity, b.identity())
+                        # A later external rewrite must not be trusted at process exit.
+                        write_cookie(b.cookie_path(), {'_uid': 'uid-a', 'session': 'EXTERNAL'})
+                        stat = b.cookie_path().stat()
+                        os.utime(b.cookie_path(), ns=(stat.st_atime_ns, event['cookie_mtime_ns'] + 1_000_000))
+                    else:
+                        self.assertEqual(b.course_identity, baseline)
+                    b.controller.stopping = True
+                    b.controller._exit_code = 2
+                    b.controller._finish()
+                with patch.object(b.controller, 'start') as start:
+                    b.startTasks()
+                start.assert_not_called()
+                self.assertIn('重新读取课程', b.message)
+                self.assertEqual(b.account_store.get(account_id)['uid'], 'uid-a')
+
     def test_import_mismatch_clear_and_delete_are_scoped(self):
         b = self.backend()
         first = self.login(b, 'a', 'uid-a')
@@ -196,6 +305,7 @@ class AccountTests(unittest.TestCase):
         events = [json.loads(line) for line in output.getvalue().splitlines()]
         self.assertEqual(events[0]['type'], 'session_ready')
         self.assertEqual(events[0]['uid'], 'uid-a')
+        self.assertEqual(events[0]['cookie_mtime_ns'], store.cookie_path(first['id']).stat().st_mtime_ns)
         self.assertEqual(events[-1]['type'], 'courses')
         self.assertNotIn('SESSION_', output.getvalue())
         self.assertEqual(store.cookie_path(second['id']).read_bytes(), second_bytes)

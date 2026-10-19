@@ -24,15 +24,13 @@ ColumnLayout {
         description: bridge.summary.demo ? "离线演示已连接 · 当前均为示例数据" : "多个账号可同时保留登录会话，Cookie 按账号加密保存。切换后读取课程即可使用；密码仅用于当前会话。"
         RowLayout {
             Layout.fillWidth: true
-            Basic.ComboBox {
+            ChoiceBox {
                 id: accounts
                 objectName: "account_selector"
                 Layout.fillWidth: true
                 implicitHeight: 40
                 model: bridge.accountRows
                 textRole: "display"
-                rightPadding: 30
-                indicator: Text { text: "▾"; color: "#627086"; anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter }
                 currentIndex: {
                     for (let i = 0; i < model.length; ++i)
                         if (model[i].id === bridge.summary.activeAccount) return i
@@ -97,9 +95,9 @@ ColumnLayout {
         Text { text: bridge.summary.courseCount + " 门"; color: "#627086"; font.pixelSize: 13 }
         Item { Layout.fillWidth: true }
         Basic.TextField { Layout.preferredWidth: 240; Layout.minimumWidth: 140; placeholderText: "搜索课程名称或 ID"; text: bridge.summary.courseSearch; Accessible.name: "搜索课程"; onTextEdited: bridge.searchCourses(text) }
-        ActionButton { text: "全选可见"; enabled: !bridge.summary.busy; onClicked: bridge.selectVisible(true) }
-        ActionButton { text: "取消选择"; enabled: !bridge.summary.busy; onClicked: bridge.selectVisible(false) }
-        ToolButton { text: page.showIds ? "隐藏 ID" : "显示 ID"; onClicked: page.showIds = !page.showIds }
+        ActionButton { objectName: "courses_select_all"; text: "全选可见"; tone: "connect"; enabled: !bridge.summary.busy; onClicked: bridge.selectVisible(true) }
+        ActionButton { objectName: "courses_clear_selection"; text: "取消选择"; tone: "warning"; subtle: true; enabled: !bridge.summary.busy; onClicked: bridge.selectVisible(false) }
+        ActionButton { objectName: "courses_show_ids"; text: checked ? "隐藏 ID" : "显示 ID"; tone: "test"; subtle: true; checkable: true; onToggled: page.showIds = checked }
     }
     ListView {
         id: courseList
@@ -110,7 +108,25 @@ ColumnLayout {
         clip: true
         spacing: 12
         model: bridge.courseRows
+        boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: ScrollBar {}
+        WheelHandler {
+            target: null
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            onWheel: function(event) {
+                // Keep precise touchpad deltas; move roughly two cards per mouse notch.
+                const delta = event.pixelDelta.y !== 0 ? event.pixelDelta.y : event.angleDelta.y / 120 * 160
+                if (delta === 0) {
+                    event.accepted = false
+                    return
+                }
+                courseList.cancelFlick()
+                const top = courseList.originY
+                const bottom = top + Math.max(0, courseList.contentHeight - courseList.height)
+                courseList.contentY = Math.max(top, Math.min(bottom, courseList.contentY - delta))
+                event.accepted = true
+            }
+        }
         delegate: Rectangle {
             required property var modelData
             required property int index

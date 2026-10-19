@@ -2,17 +2,17 @@
 
 面向 Windows 的超星课程学习工作台，用一个桌面窗口管理账号、课程、章节任务、题库与 AI 服务，以及逐题结果和日志。
 
-**当前版本：0.3.5** · **Windows 10 / 11 x64** · **Python + PySide6 / QML** · **GPL-3.0**
+**当前版本：0.3.6** · **Windows 10 / 11 x64** · **Python + PySide6 / QML** · **GPL-3.0**
 
-[下载安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.5/ChaoxingDesktop-0.3.5-Setup-win-x64.exe) · [发行说明](https://github.com/mikubob/ChaoXingDeskTop/releases/tag/v0.3.5) · [使用与构建指南](desktop/README.md) · [第三方声明](desktop/THIRD_PARTY_NOTICES.md)
+[下载安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.6/ChaoxingDesktop-0.3.6-Setup-win-x64.exe) · [发行说明](https://github.com/mikubob/ChaoXingDeskTop/releases/tag/v0.3.6) · [使用与构建指南](desktop/README.md) · [第三方声明](desktop/THIRD_PARTY_NOTICES.md)
 
 ## 下载与安装
 
 | 文件 | 用途 |
 | --- | --- |
-| [Windows x64 安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.5/ChaoxingDesktop-0.3.5-Setup-win-x64.exe) | 日常使用，约 **89.4 MiB**，已包含 Python 运行环境 |
-| [对应版本源码](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.5/ChaoxingDesktop-0.3.5-source.zip) | 查看实现、自行运行或构建 |
-| [SHA256 校验清单](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.5/ChaoxingDesktop-0.3.5-installer-SHA256.json) | 核对安装包及源码 ZIP 的完整性 |
+| [Windows x64 安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.6/ChaoxingDesktop-0.3.6-Setup-win-x64.exe) | 日常使用，已包含 Python 运行环境 |
+| [对应版本源码](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.6/ChaoxingDesktop-0.3.6-source.zip) | 查看实现、自行运行或构建 |
+| [SHA256 校验清单](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.6/ChaoxingDesktop-0.3.6-installer-SHA256.json) | 核对安装包及源码 ZIP 的完整性 |
 
 下载并运行安装包，按提示完成安装后，从桌面或开始菜单打开「超星桌面版」。首次使用可以直接选择「离线演示」，体验界面和任务流程。
 
@@ -41,6 +41,13 @@
 题库按顺序查询，AI 补全未解决的题目，启用人工补全后可继续处理剩余答案。随机补全默认关闭。
 
 默认只保存答案。自动提交需要独立开启，并要求所有题目已有答案；仍有空白题目时仅保存。
+
+## 0.3.6 更新
+
+- 修复停止任务后再次启动被误判为「登录信息已改变」；同一账号经后台验证的 Cookie 刷新会同步到课程会话记录，仍校验账号、凭据与外部文件变化。
+- 统一下拉框选中样式，使用蓝底白字与勾选标记，覆盖账号、设置和日志筛选。
+- 加大课程列表的鼠标滚轮步幅，保留触控板精细滚动；课程全选、取消和 ID 显示按钮使用不同颜色，ID 按钮具有边框和开启状态。
+- 移除旧通知 INI 读取入口、无效题库参数、无用状态与隐藏控件，以及未使用的侧栏图标变体；升级时清理对应旧资源。保留旧设置迁移与平台兼容逻辑，未新增运行依赖。
 
 ## 0.3.5 更新
 

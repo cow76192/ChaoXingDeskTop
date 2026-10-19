@@ -206,7 +206,7 @@ class Backend(QObject):
     @Property("QVariantList", notify=providersChanged)
     def providers(self):
         enabled = self.enabled_providers()
-        return [dict(key=k, title=dict((v, n) for n, v in BANKS)[k], enabled=k in enabled,
+        return [dict(key=k, title=PROVIDER_SPECS[k].title, enabled=k in enabled,
                      secret=PROVIDER_SPECS[k].secret) for k in self.provider_order]
 
     def notify(self, message, tone="info"):
@@ -559,11 +559,26 @@ class Backend(QObject):
             return
         kind = event.get("type")
         if kind == 'session_ready':
-            if event.get('account_id') != self.operation_account or not self.account_store:
+            if (not self.account_store or event.get('account_id') != self.operation_account
+                    or self.operation_account != self.account_store.active):
                 return
             def remember():
-                self.account_store.update(self.operation_account, uid=str(event['uid']))
+                uid = str(event['uid'])
+                row = self.account_store.get(self.operation_account)
+                if not uid or not row or (row['uid'] and row['uid'] != uid):
+                    raise ValueError('平台会话与当前账号不一致，请重新读取课程。')
+                identity = self.identity()
+                self.account_store.update(self.operation_account, uid=uid)
                 self.config['common']['use_cookies'] = 'true'
+                # A verified worker login rewrites its Cookie file even when the
+                # user did not change accounts. Trust only that exact revision;
+                # external edits and changed login settings still invalidate courses.
+                if (self.operation == 'run' and self.controller.active and not self.demo_mode
+                        and self.course_identity is not None
+                        and identity[:4] == self.course_identity[:4]
+                        and identity[-1] is not None
+                        and event.get('cookie_mtime_ns') == identity[-1]):
+                    self.course_identity = (*identity[:3], 'true', identity[-1])
                 self.configChanged.emit()
                 self.changed.emit()
             self.execute(remember)

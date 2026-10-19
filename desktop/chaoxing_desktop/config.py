@@ -82,7 +82,7 @@ def defaults() -> configparser.ConfigParser:
         bank[prefix + "_timeout"] = timeout
         if prefix != "go":
             bank[prefix + "_min_interval"] = "1.0"
-        if prefix in ("yanxi", "adapter", "declarative"):
+        if prefix in ("yanxi", "adapter"):
             bank[prefix + "_retries"] = "2"
     config['format'] = {'version': str(CONFIG_VERSION)}
     config['question_bank'].update(declarative_definition='', declarative_token='',

@@ -18,11 +18,10 @@ from api.logger import logger
 class Tiku:
     DISABLE = False
 
-    def __init__(self, config_path=None):
+    def __init__(self):
         self._conf = None
         self.name = ""
         self.api = ""
-        self.token = ""
         self._last_query_request = None
 
     def config_set(self, config):
@@ -82,7 +81,7 @@ class Tiku:
             wait(self, retry_delay(response, attempt))
 
     @staticmethod
-    def get_tiku_from_config(config, config_path=None):
+    def get_tiku_from_config(config):
         name = config.get("provider", "")
         if not name:
             return DummyTiku()
@@ -93,9 +92,9 @@ class Tiku:
 
 class TikuYanxi(Tiku):
     # 言溪题库实现
-    def __init__(self, config_path: Optional[str] = None) -> None:
+    def __init__(self) -> None:
         """初始化言溪题库实例."""
-        super().__init__(config_path)
+        super().__init__()
         self.name = '言溪题库'
         self.api = 'https://tk.enncy.cn/query'
         self._token = None
@@ -213,9 +212,9 @@ class TikuYanxi(Tiku):
 
 class TikuGo(Tiku):
     # GO题（网课小工具题库）实现
-    def __init__(self, config_path: Optional[str] = None) -> None:
+    def __init__(self) -> None:
         """初始化GO题实例."""
-        super().__init__(config_path)
+        super().__init__()
         self.name = 'GO题（网课小工具题库）'
         self.api = 'https://q.icodef.com/wyn-nb?v=4'
         self._headers = {
@@ -400,9 +399,9 @@ class TikuGo(Tiku):
 
 class TikuLike(Tiku):
     # LIKE知识库实现 参考 https://www.datam.site/
-    def __init__(self, config_path: Optional[str] = None) -> None:
+    def __init__(self) -> None:
         """初始化LIKE知识库实例."""
-        super().__init__(config_path)
+        super().__init__()
         self.name = 'LIKE知识库'
         self.query_api = 'https://app.datam.site/api/v1/query'
         self.balance_api = 'https://app.datam.site/api/v1/balance'
@@ -747,9 +746,9 @@ class TikuLike(Tiku):
 
 class TikuAdapter(Tiku):
     # TikuAdapter题库实现 https://github.com/DokiDoki1103/tikuAdapter
-    def __init__(self, config_path: Optional[str] = None) -> None:
+    def __init__(self) -> None:
         """初始化TikuAdapter题库实例."""
-        super().__init__(config_path)
+        super().__init__()
         self.name = 'TikuAdapter题库'
         self.api = ''
 

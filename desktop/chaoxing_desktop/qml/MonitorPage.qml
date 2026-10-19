@@ -51,7 +51,6 @@ ColumnLayout {
                         TabButton { text: "章节任务" }
                         TabButton { text: "逐题结果（" + bridge.summary.questionCount + "）" }
                     }
-                    Text { visible: false; text: "章节任务"; font.pixelSize: 16; font.bold: true; color: "#17243a"; Layout.fillWidth: true }
                     Text { text: bridge.summary.busy ? "运行中" : "当前任务"; font.pixelSize: 12; color: "#627086" }
                 }
                 ListView {
@@ -116,7 +115,7 @@ ColumnLayout {
                 RowLayout {
                     visible: page.logsOpen; Layout.fillWidth: true
                     Basic.TextField { id: logSearch; objectName: "logSearch"; Layout.fillWidth: true; placeholderText: "搜索当前保留日志"; Accessible.name: "搜索日志"; onTextEdited: logFilterTimer.restart() }
-                    Basic.ComboBox { id: logLevel; model: ["全部级别", "警告及错误", "仅错误"]; Accessible.name: "日志级别"; onActivated: logFilterTimer.restart() }
+                    ChoiceBox { id: logLevel; model: ["全部级别", "警告及错误", "仅错误"]; Accessible.name: "日志级别"; onActivated: logFilterTimer.restart() }
                     Basic.CheckBox {
                         id: followCheck; text: "跟随最新"; checked: page.followLogs; onToggled: page.followLogs = checked
                         contentItem: Text { text: followCheck.text; color: "#e2e8f0"; leftPadding: followCheck.indicator.width + followCheck.spacing; verticalAlignment: Text.AlignVCenter }
