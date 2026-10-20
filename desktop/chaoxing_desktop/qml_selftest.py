@@ -160,8 +160,33 @@ def start_smoke(app, engine, backend, destination):
                 snapshot("人工补全")
                 backend.clear_input()
                 backend.controller.active = False
+                backend.setValue('discussion', 'reply_level', 'fixed_good')
+                backend.previewDiscussion('任意主题，不应调用模型')
+                assert backend.discussionPreview['content'] == '好'
+                assert not backend.controller.active, 'Fixed preview started a worker'
+                root.setProperty('pageIndex', 2)
+                root.findChild(QObject, 'serviceTabs').setProperty('currentIndex', 3)
+                phase[0] = 13
+            elif phase[0] == 13:
+                snapshot('讨论设置与固定预览')
+                root.setWidth(980); root.setHeight(700)
+                phase[0] = 14
+            elif phase[0] == 14:
+                snapshot('讨论设置-980')
+                backend.on_event(dict(type='discussion_result', record=dict(
+                    id='offline-discussion', run_id=backend.controller.run_id, task_id='offline-task',
+                    course='课程 · 离线验收', chapter='章节讨论', title='离线示例讨论主题',
+                    level='fixed_good', source='fixed', stage='draft', task_status='pending',
+                    reason='仅本地草稿，未调用模型或发布。', content='好', elapsed_ms=0)))
+                assert backend.summary['discussionCount'] == 1
+                backend.changed.emit()
+                root.setProperty('pageIndex', 4)
+                root.findChild(QObject, 'resultTabs').setProperty('currentIndex', 2)
+                phase[0] = 15
+            elif phase[0] == 15:
+                snapshot('讨论记录')
                 assert not warnings, "QML warnings: " + "\n".join(warnings[:6])
-                finish(True, "QML and worker: multiple encrypted accounts, switch isolation/lock, restart, legacy Cookie migration, demo (9 chapters), stop, hidden selections, encrypted credential restoration and page screenshots passed.")
+                finish(True, "QML and worker: accounts, 9 demo chapters, pause/stop, settings, discussion preview (zero AI), narrow discussion layout and discussion results passed.")
         except Exception as exc:
             finish(False, str(exc))
     timer.timeout.connect(tick)

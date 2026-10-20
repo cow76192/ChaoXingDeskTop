@@ -48,8 +48,10 @@ ColumnLayout {
                     Layout.fillWidth: true
                     TabBar {
                         id: resultTabs; objectName: "resultTabs"; Layout.fillWidth: true
+                        onCurrentIndexChanged: if (currentIndex === 2) page.logsOpen = false
                         TabButton { text: "章节任务" }
                         TabButton { text: "逐题结果（" + bridge.summary.questionCount + "）" }
+                        TabButton { text: "讨论记录（" + bridge.summary.discussionCount + "）" }
                     }
                     Text { text: bridge.summary.busy ? "运行中" : "当前任务"; font.pixelSize: 12; color: "#627086" }
                 }
@@ -94,6 +96,7 @@ ColumnLayout {
                     Text { visible: taskList.count === 0; anchors.centerIn: parent; text: "选择课程后，章节任务将在这里显示"; color: "#627086"; font.pixelSize: 14 }
                 }
                 QuestionResults { id: questions; visible: resultTabs.currentIndex === 1; Layout.fillWidth: true; Layout.fillHeight: true }
+                DiscussionResults { visible: resultTabs.currentIndex === 2; Layout.fillWidth: true; Layout.fillHeight: true }
             }
         }
         Rectangle {

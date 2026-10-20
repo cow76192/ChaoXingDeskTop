@@ -2,17 +2,17 @@
 
 面向 Windows 的超星课程学习工作台，用一个桌面窗口管理账号、课程、章节任务、题库与 AI 服务，以及逐题结果和日志。
 
-**当前版本：0.3.7** · **Windows 10 / 11 x64** · **Python + PySide6 / QML** · **GPL-3.0**
+**当前版本：0.3.8** · **Windows 10 / 11 x64** · **Python + PySide6 / QML** · **GPL-3.0**
 
-[下载安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.7/ChaoxingDesktop-0.3.7-Setup-win-x64.exe) · [发行说明](https://github.com/mikubob/ChaoXingDeskTop/releases/tag/v0.3.7) · [使用与构建指南](desktop/README.md) · [第三方声明](desktop/THIRD_PARTY_NOTICES.md)
+[下载安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.8/ChaoxingDesktop-0.3.8-Setup-win-x64.exe) · [发行说明](https://github.com/mikubob/ChaoXingDeskTop/releases/tag/v0.3.8) · [使用与构建指南](desktop/README.md) · [第三方声明](desktop/THIRD_PARTY_NOTICES.md)
 
 ## 下载与安装
 
 | 文件 | 用途 |
 | --- | --- |
-| [Windows x64 安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.7/ChaoxingDesktop-0.3.7-Setup-win-x64.exe) | 日常使用，已包含 Python 运行环境 |
-| [对应版本源码](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.7/ChaoxingDesktop-0.3.7-source.zip) | 查看实现、自行运行或构建 |
-| [SHA256 校验清单](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.7/ChaoxingDesktop-0.3.7-installer-SHA256.json) | 核对安装包及源码 ZIP 的完整性 |
+| [Windows x64 安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.8/ChaoxingDesktop-0.3.8-Setup-win-x64.exe) | 日常使用，已包含 Python 运行环境 |
+| [对应版本源码](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.8/ChaoxingDesktop-0.3.8-source.zip) | 查看实现、自行运行或构建 |
+| [SHA256 校验清单](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.8/ChaoxingDesktop-0.3.8-installer-SHA256.json) | 核对安装包及源码 ZIP 的完整性 |
 
 下载并运行安装包，按提示完成安装后，从桌面或开始菜单打开「超星桌面版」。首次使用可以直接选择「离线演示」，体验界面和任务流程。
 
@@ -28,6 +28,7 @@
 | 题库与 AI | 配置多个题库的查询顺序、凭据、超时和重试，支持 AI 补全与视觉模型 |
 | 答案与逐题结果 | 人工补全、题库答案审核、候选来源与拒绝原因、查询耗时及章节筛选 |
 | 任务与日志 | 暂停后续处理、停止任务、日志搜索与级别筛选、脱敏日志持久化 |
+| 讨论任务 | 四档回复、独立草稿 / 自动提交、本人回复检查、持久化防重复及发布 / 任务点分别核验 |
 
 支持声明式 JSON 题库模板，可配置 GET / POST、题型映射和响应字段路径；模板中的 JavaScript 不会执行。
 
@@ -41,6 +42,18 @@
 题库按顺序查询，AI 补全未解决的题目，启用人工补全后可继续处理剩余答案。随机补全默认关闭。
 
 默认只保存答案。自动提交需要独立开启，并要求所有题目已有答案；仍有空白题目时仅保存。
+
+**0.3.8 新增讨论任务功能**：在「题库与 AI → 讨论任务」启用处理，选择精简、中等、详细或固定单字“好”；按需独立开启讨论自动提交。关闭提交时仅保存草稿，在「任务与日志 → 讨论记录」查看和复制。前三档复用 AI 服务；固定好不调用模型。新配置默认关闭讨论处理和提交。
+
+支持经章节 `insertbbs` 明确关联的新版超星讨论；非任务点、未知页面和无法核实本人回复时不自动发布。发布结果未知时保留记录，只读核验，不盲目重发。发布、任务点完成和成绩是三个不同结果。[讨论协议与边界](desktop/vendor/chaoxing/api/DISCUSSION_PROTOCOL.md)
+
+## 0.3.8 更新
+
+- 新增章节讨论任务：精简、中等、详细和固定单字“好”四档，复用现有 AI 服务，并提供独立的自动提交开关。
+- 新增示例主题预览、讨论记录、搜索筛选、纯文本详情及复制；固定模式完全本地，默认关闭讨论处理和提交。
+- 发布前核实本人顶层回复，持久化草稿与发布意图；结果未知时只读核验，跨重试和重启避免重复发布。
+- 分别确认回复发布、任务点和章节状态；旧版页面或身份无法核实的场景保留待处理。
+- 补充讨论与同章媒体调度回归及冻结模块检查，完成全新安装、0.3.7 覆盖升级与卸载验收。未新增运行依赖。
 
 ## 0.3.7 更新
 

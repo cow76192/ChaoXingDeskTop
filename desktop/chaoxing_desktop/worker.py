@@ -29,6 +29,9 @@ class Channel:
                 values["message"] = values["message"][:4075] + " …[日志过长，已截断]"
         if event_type == 'question_result':
             values = safe_record(values, self.redactor)
+        if event_type == 'discussion_result':
+            from .discussion_model import safe_record as safe_discussion
+            values = dict(record=safe_discussion(values['record'], self.redactor))
         values.setdefault('run_id', self.run_id)
         with self.lock:
             self.output.write(json.dumps({"type": event_type, **values}, ensure_ascii=False) + "\n")
@@ -128,6 +131,13 @@ def demo(channel, command):
             router = AnswerRouter(command['config'], channel, [('演示题库', SimpleNamespace(_query=lambda q: '第二项'))])
             router.set_context(task_id=task['id'], work_id='demo-work', attempt=0)
             router.query_all([dict(id='demo-question', title='以下哪项是演示答案？', type='single', options='A.第一项\nB.第二项')])
+            channel.send('discussion_result', record=dict(
+                id=task['id']+':discussion', run_id=channel.run_id, task_id=task['id'],
+                course=task['course'], chapter='章节讨论 · 离线演示',
+                title='大学生如何在学习与实践中承担社会责任？', level='medium', source='ai',
+                stage='draft', task_status='pending', elapsed_ms=0,
+                reason='离线示例草稿，未调用 AI、未发布。开启真实讨论功能后按独立配置处理。',
+                content='大学生可以通过扎实学习专业知识、参与社会实践与志愿服务，在具体行动中提升能力、承担责任。'))
         channel.send("task", id=task["id"], status="success")
     channel.send("done", success=len(tasks), failed=0, skipped=0, pending=0, demo=True)
 
@@ -369,9 +379,16 @@ def main() -> int:
                 raise RuntimeError('验证码识别模型或运行库检查失败')
             from .diagnostics import offline_check
             offline_check()
+            from api.discussion import DiscussionAdapter
+            from .discussion import DiscussionGenerator
+            from .discussion_store import topic_key
+            if (DiscussionGenerator(policy_router).generate('离线讨论检查', '', 'fixed_good', ()) != '好'
+                    or len(topic_key('probe', 'course', 'class', 'space', 'topic')) != 64
+                    or not callable(DiscussionAdapter.publish_once)):
+                raise RuntimeError('讨论生成、存储或平台适配模块检查失败')
             channel.send("probe", ocs_ready=True, message="核心、字体资源、题库 v2 参数、图片编码及验证码识别正常",
                          font_entries=len(fonthash_dao.char_map), bank_protocol='v2-text-and-images',
-                         matching_ready=True, captcha_ready=True, review_policy_ready=True)
+                         matching_ready=True, captcha_ready=True, review_policy_ready=True, discussion_ready=True)
         elif command.get('action') == 'check_bank':
             load_core(channel)
             from .answers import build_answers
@@ -389,6 +406,16 @@ def main() -> int:
             from .answers import AIClient
             AIClient(command["config"]["ai"]).check_connection()
             channel.send("ai_check")
+        elif command.get('action') == 'discussion_preview':
+            from .answers import AnswerRouter, AIClient
+            from .discussion import DiscussionGenerator
+            cfg = command['config']
+            ai = AIClient(cfg['ai']) if cfg['ai']['enabled'] == 'true' else None
+            router = AnswerRouter(cfg, channel, ai=ai)
+            content = DiscussionGenerator(router).generate(str(command.get('topic', '')),
+                '', cfg['discussion']['reply_level'], ('preview',))
+            channel.send('discussion_preview', content=channel.redactor(content),
+                         level=cfg['discussion']['reply_level'])
         elif command.get("demo"):
             demo(channel, command)
         else:

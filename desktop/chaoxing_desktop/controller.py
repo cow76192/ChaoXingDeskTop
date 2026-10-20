@@ -126,6 +126,13 @@ class Controller(QObject):
         if kind == 'question_result':
             from .question_model import valid_record
             return valid_record(event.get('record'))
+        if kind == 'discussion_result':
+            from .discussion_model import valid_record
+            return valid_record(event.get('record'))
+        if kind == 'discussion_preview':
+            return (isinstance(event.get('content'), str) and 0 < len(event['content']) <= 1000
+                    and event.get('level') in ('concise', 'medium', 'detailed', 'fixed_good')
+                    and (event['level'] != 'fixed_good' or event['content'] == '好'))
         if kind == 'control':
             return type(event.get('paused')) is bool
         if kind == "task":

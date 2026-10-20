@@ -5,6 +5,7 @@ Rectangle {
     id: panel
     property string title: ""
     property string description: ""
+    property real contentSpacing: 16
     default property alias content: body.data
     color: "white"
     radius: 12
@@ -16,6 +17,6 @@ Rectangle {
         spacing: 6
         Text { visible: panel.title !== ""; text: panel.title; font.pixelSize: 17; font.bold: true; color: "#17243a"; Layout.fillWidth: true; wrapMode: Text.Wrap }
         Text { visible: panel.description !== ""; text: panel.description; font.pixelSize: 12; color: "#627086"; Layout.fillWidth: true; wrapMode: Text.Wrap }
-        ColumnLayout { id: body; Layout.fillWidth: true; Layout.topMargin: panel.title ? 12 : 0; spacing: 16 }
+        ColumnLayout { id: body; Layout.fillWidth: true; Layout.topMargin: panel.title ? 12 : 0; spacing: panel.contentSpacing }
     }
 }

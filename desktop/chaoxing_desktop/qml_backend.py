@@ -16,6 +16,7 @@ from .settings import restore_credentials, serialize_settings
 from .models import LogModel, LogFilter, TaskModel, STATUS, TERMINAL
 from .log_store import LogStore, AsyncLogStore
 from .question_model import QuestionModel, QuestionFilter
+from .discussion_model import DiscussionModel, DiscussionFilter, safe_record as safe_discussion
 from .query_result import safe_record
 from .providers import PROVIDER_SPECS
 from .accounts import AccountStore, parse_cookie, write_cookie
@@ -88,6 +89,9 @@ class Backend(QObject):
         self._question_model = QuestionModel(self)
         self._question_filter = QuestionFilter(self._question_model, self)
         self._question_revision = 0
+        self._discussion_model = DiscussionModel(self)
+        self._discussion_filter = DiscussionFilter(self._discussion_model, self)
+        self.discussion_preview = dict(content='', level='', reason='输入示例主题，预览不会发布到课程。')
         self.bank_status = "尚未检查"
         self.log_store = AsyncLogStore(self)
         self.log_store.failed.connect(self.on_log_failure)
@@ -160,6 +164,14 @@ class Backend(QObject):
         return self._question_filter
 
     @Property(QObject, constant=True)
+    def discussionModel(self):
+        return self._discussion_filter
+
+    @Property('QVariantMap', notify=changed)
+    def discussionPreview(self):
+        return dict(self.discussion_preview)
+
+    @Property(QObject, constant=True)
     def logModel(self):
         return self._log_filter
 
@@ -186,6 +198,10 @@ class Backend(QObject):
                     questionCount=len(self._question_model.rows), questionEvicted=self._question_model.evicted,
                     questionRevision=self._question_revision,
                     questionStats=dict(self._question_model.stats),
+                    discussionCount=len(self._discussion_model.rows), discussionEvicted=self._discussion_model.evicted,
+                    discussionStats={key: sum(r['stage'] == key for r in self._discussion_model.rows)
+                                     for key in ('draft', 'published', 'existing', 'publish_unknown', 'pending', 'skipped')},
+                    discussionConfirmed=sum(r['task_status'] == 'confirmed' for r in self._discussion_model.rows),
                     mode=self.mode, demo=self.demo_mode, courseCount=len(self.courses),
                     selectedCount=len(self.selected), hiddenCount=hidden,
                     courseSearch=self.search,
@@ -234,6 +250,7 @@ class Backend(QObject):
         return self.account_store.cookie_path(self.account_store.active)
 
     def reset_account_view(self):
+        self._discussion_model.clear()
         self.courses, self.selected, self.course_identity = [], set(), None
         self.search, self.demo_mode = '', False
         self.operation_account = ''
@@ -386,7 +403,7 @@ class Backend(QObject):
         return (self.account_store.active if self.account_store else '', c["username"], c["password"],
                 c["use_cookies"], cookie.stat().st_mtime_ns if cookie and cookie.exists() else None)
 
-    def begin(self, action, demo=False, selected=None):
+    def begin(self, action, demo=False, selected=None, topic=''):
         if self.controller.active:
             raise ValueError("请先停止当前任务。")
         config = defaults() if demo else self.config
@@ -419,6 +436,14 @@ class Backend(QObject):
             ai_only["question_bank"]["providers"] = ""
             ai_only["notification"]["provider"] = ""
             validate(ai_only, services=True)
+        if action == 'discussion_preview':
+            isolated = parse_text(serialize(config))
+            isolated['question_bank']['providers'] = ''
+            isolated['notification']['provider'] = ''
+            if isolated['ai']['enabled'] != 'true':
+                raise ValueError('请先启用并配置 AI 服务，或选择固定回复好。')
+            validate(isolated, services=True)
+            config = isolated
         self.operation, self.outcome = action, False
         self.operation_account = self.account_store.active if self.account_store and not demo and action in ('courses', 'run') else ''
         payload = to_payload(config)
@@ -430,11 +455,16 @@ class Backend(QObject):
         if action == "run":
             self._task_model.reset([])
             self._question_model.clear()
+            self._discussion_model.clear()
             self.reset_question_filters()
             self.pageRequested.emit(4)
         self.mode = "离线演示 · 示例数据" if demo else "检查 AI 连接" if action == "check_ai" else "正在连接超星"
         self.notify("正在读取课程…" if action == "courses" else "正在检查 AI 连接…" if action == "check_ai" else "正在准备任务…")
         command = dict(action=action, demo=demo, config=payload, selected=selected or [], data_dir=str(data_dir()))
+        if action == 'discussion_preview':
+            command['topic'] = topic
+            self.mode = '讨论预览 · 请求已配置 AI 服务'
+            self.notify('正在生成讨论预览，将请求已配置 AI 服务，不访问课程或发布接口。')
         if self.operation_account:
             command.update(account_id=self.operation_account,
                            account_uid=self.account_store.get(self.operation_account)['uid'])
@@ -469,6 +499,36 @@ class Backend(QObject):
     def questionDetail(self, record_id):
         row = self._question_model.row_index(record_id)
         return self._question_model.data(self._question_model.index(row)) if row is not None else {}
+
+    @Slot(str, str)
+    def filterDiscussions(self, query, stage):
+        self._discussion_filter.set_filter(query, stage)
+
+    @Slot(str, result='QVariantMap')
+    def discussionDetail(self, record_id):
+        return self._discussion_model.detail(record_id)
+
+    @Slot(str)
+    def previewDiscussion(self, topic):
+        def run():
+            if self.controller.active:
+                raise ValueError('请先结束当前任务，再生成预览。')
+            if not topic.strip() or len(topic) > 12000:
+                raise ValueError('请填写不超过 12000 字符的示例讨论主题。')
+            if self.config['discussion']['reply_level'] == 'fixed_good':
+                self.discussion_preview = dict(content='好', level='fixed_good', reason='本地固定回复 · 模型调用 0 次 · 不发布')
+                self.changed.emit()
+                return
+            self.begin('discussion_preview', topic=topic.strip())
+        self.execute(run)
+
+    @Slot(str)
+    def copyDiscussion(self, record_id):
+        from PySide6.QtGui import QGuiApplication
+        record = self._discussion_model.detail(record_id)
+        if record.get('content'):
+            QGuiApplication.clipboard().setText(record['content'])
+            self.notify('讨论正文已复制。')
 
     @Slot()
     def pause(self):
@@ -558,6 +618,20 @@ class Backend(QObject):
         if event.get('run_id', self.controller.run_id) != self.controller.run_id:
             return
         kind = event.get("type")
+        if kind == 'discussion_result':
+            if event['record']['run_id'] != self.controller.run_id:
+                return
+            record = safe_discussion(event['record'], lambda text: self.redact(self.log_redactor(text)))
+            if self._discussion_model.upsert(record) and not self._progress_timer.isActive():
+                self._progress_timer.start()
+            return
+        if kind == 'discussion_preview':
+            self.outcome = True
+            self.discussion_preview = dict(content=event['content'], level=event['level'],
+                                           reason='已配置 AI 服务生成 · 仅预览，不会发布')
+            self.mode = '讨论预览已完成'
+            self.notify('讨论预览已生成，请核对内容。', 'success')
+            return
         if kind == 'session_ready':
             if (not self.account_store or event.get('account_id') != self.operation_account
                     or self.operation_account != self.account_store.active):

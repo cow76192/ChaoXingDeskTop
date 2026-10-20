@@ -174,7 +174,7 @@ def decode_course_card(html_text: str) -> Tuple[List[Dict[str, Any]], Dict[str, 
     # 提取mArg参数
     assignment = re.search(r"\bmArg\s*=\s*(?=\{)", html_text)
     if not assignment:
-        return [], {}
+        return _discussion_cards(html_text, []), {}
 
     # 解析JSON数据
     cards_data, _ = json.JSONDecoder().raw_decode(html_text[assignment.end():])
@@ -188,8 +188,46 @@ def decode_course_card(html_text: str) -> Tuple[List[Dict[str, Any]], Dict[str, 
     # 处理所有附件任务
     cards = cards_data.get("attachments", [])
     job_list = _process_attachment_cards(cards)
+    # Discussion modules may have no job field, or an unknown attachment type.
+    # Inspect the same cards HTML before allowing the empty-chapter path.
+    discussions = _discussion_cards(html_text, cards)
+    existing = {str(j.get('mid', '')) for j in discussions}
+    job_list = [j for j in job_list if not (j['type'] == 'discussion' and str(j.get('mid', '')) in existing)]
+    job_list.extend(discussions)
 
     return job_list, job_info
+
+
+def _discussion_job(card):
+    prop = card.get('property') or {}
+    required = card.get('job') if type(card.get('job')) is bool else None
+    return dict(type='discussion', required=required, isPassed=card.get('isPassed') is True,
+                mid=str(prop.get('mid') or card.get('mid') or ''),
+                jobid=str(card.get('jobid') or prop.get('jobid') or ''),
+                name=prop.get('title') or '章节讨论', property=dict(prop), enc=card.get('enc', ''))
+
+
+def _discussion_cards(html_text, cards):
+    jobs = []
+    for frame in BeautifulSoup(html_text, 'lxml').select('iframe[src]'):
+        if urlsplit(frame.get('src', '')).path != '/ananas/modules/insertbbs/index.html':
+            continue
+        try:
+            data = json.loads(frame.get('data', '{}'))
+            if not isinstance(data, dict):
+                raise ValueError
+        except (ValueError, TypeError):
+            jobs.append(dict(type='discussion', required=None, mid='', jobid='', name='讨论模块数据无法识别'))
+            continue
+        mid = str(data.get('mid') or '')
+        matches = [c for c in cards if mid and str((c.get('property') or {}).get('mid') or c.get('mid') or '') == mid]
+        if len(matches) == 1:
+            card = dict(matches[0])
+            card['property'] = dict(data, **(card.get('property') or {}))
+        else:
+            card = dict(property=data)  # No qualification by array index/title.
+        jobs.append(_discussion_job(card))
+    return jobs
 
 
 def _extract_job_info(cards_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +269,9 @@ def _process_attachment_cards(cards: List[Dict[str, Any]]) -> List[Dict[str, Any
     job_list = []
 
     for card in cards:
+        if attachment_kind(card) == 'discussion':
+            job_list.append(_discussion_job(card))
+            continue
         # 跳过已通过的任务
         if card.get("isPassed", False):
             continue
@@ -302,7 +343,7 @@ def _process_attachment_cards(cards: List[Dict[str, Any]]) -> List[Dict[str, Any
 def attachment_kind(card: Dict[str, Any]) -> str:
     """Resolve player module first; legacy cards can call MP3 resources video."""
     prop = card.get('property') or {}
-    modules = {'insertaudio': 'audio', 'insertvideo': 'video', 'insertdoc': 'document'}
+    modules = {'insertaudio': 'audio', 'insertvideo': 'video', 'insertdoc': 'document', 'insertbbs': 'discussion'}
     module = str(prop.get('module') or card.get('module') or '').lower()
     if module in modules:
         return modules[module]

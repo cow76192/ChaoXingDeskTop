@@ -1,5 +1,5 @@
 """Declarative field metadata shared by the QML settings pages."""
-from .config import BANK_REVIEW_POLICIES
+from .config import BANK_REVIEW_POLICIES, DISCUSSION_LEVELS
 
 
 def field(title, section, key, kind="text", low=0, high=100, choices=(), hint=""):
@@ -12,6 +12,13 @@ def group(title, description, fields):
 
 
 SCHEMA = {
+    "discussion": [group("讨论任务", "仅处理所选章节中明确关联的必做讨论；发布、任务完成与成绩分别记录。", [
+        field("启用讨论任务处理", "discussion", "enabled", "bool"),
+        field("回复水平", "discussion", "reply_level", "choice", choices=DISCUSSION_LEVELS,
+              hint="前三档使用上方 AI 服务；固定好完全本地生成，不调用 AI。"),
+        field("生成后自动提交讨论回复", "discussion", "auto_submit", "bool",
+              hint="关闭时仅保存本地草稿。与测验自动提交分别控制；发布未知时不重复提交。"),
+    ])],
     "learning": [
         group("学习与任务调度", "调整本轮学习节奏，设置用于下一次任务。", [
             field("视频倍速", "common", "speed", "number", 1, 2, hint="1–2 倍"),

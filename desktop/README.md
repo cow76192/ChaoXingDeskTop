@@ -110,27 +110,27 @@ python -m venv .venv-build
 ### 构建程序
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -OutputDirectory dist/release-0.3.7/ChaoxingDesktop
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -OutputDirectory dist/release-0.3.8/ChaoxingDesktop
 ```
 
 构建脚本会准备 `.venv-build`、安装锁定依赖并核对依赖闭包，随后运行单元与源码界面回归、执行 PyInstaller，最后验收冻结 worker 与 QML 界面。
 
-程序输出至 `dist/release-0.3.7/ChaoxingDesktop/`。可通过 `-Wheelhouse <绝对路径>` 使用完整的本地 wheel 目录离线安装。依赖更新需要重新生成、审阅锁文件，并在干净环境中验证。
+程序输出至 `dist/release-0.3.8/ChaoxingDesktop/`。可通过 `-Wheelhouse <绝对路径>` 使用完整的本地 wheel 目录离线安装。依赖更新需要重新生成、审阅锁文件，并在干净环境中验证。
 
 ### 生成安装包
 
 准备 [NSIS 编译器](https://nsis.sourceforge.io/Download)，将下方路径替换为本机的 `makensis.exe`：
 
 ```powershell
-.venv-build/Scripts/python.exe scripts/build_installer.py --app dist/release-0.3.7/ChaoxingDesktop --compiler "C:/Tools/NSIS/makensis.exe"
+.venv-build/Scripts/python.exe scripts/build_installer.py --app dist/release-0.3.8/ChaoxingDesktop --compiler "C:/Tools/NSIS/makensis.exe"
 ```
 
 产物默认写入项目根目录的 `release/`：
 
 ```text
-ChaoxingDesktop-0.3.7-Setup-win-x64.exe
-ChaoxingDesktop-0.3.7-source.zip
-ChaoxingDesktop-0.3.7-installer-SHA256.json
+ChaoxingDesktop-0.3.8-Setup-win-x64.exe
+ChaoxingDesktop-0.3.8-source.zip
+ChaoxingDesktop-0.3.8-installer-SHA256.json
 ```
 
 安装包包含完整程序、对应源码 ZIP、许可和第三方声明，NSIS 编译器不随包分发。生成安装包前会核对程序版本、源码与产物哈希，以及单元、worker、GUI 验收标记；跳过 GUI 的构建不能用于正式发布。修改构建输入后，需要重新构建和验收。
@@ -159,6 +159,21 @@ ChaoxingDesktop-0.3.7-installer-SHA256.json
 - 平台适配源码进入 Python 归档，不再重复复制 `.py`；完整源码仍随安装包提供。
 
 体积、离线负载对比和该版本验收结果见 [项目首页](../README.md#035-更新)。
+
+## 讨论任务（0.3.8 新增）
+
+在「题库与 AI → 讨论任务」启用处理，选择回复水平，并独立设置讨论自动提交。新旧配置缺省均为关闭；测验提交开关不影响讨论。运行时设置锁定，变更用于下一轮。
+
+- 精简、中等、详细分别以 50–100、150–250、350–600 字为生成目标，复用现有 AI 地址、Key、模型、间隔和请求预算；正文上限 1000 个 Unicode 字符，超限不会截断后发布。
+- 固定模式始终输出单字 `好`，不初始化或请求模型，不补字、不因失败换档；不保证任意课程都接受或得分。
+- 预览仅使用输入的示例主题，前三档会请求已配置 AI 服务；固定模式完全本地。预览不读取课程、不发布。
+- 关闭自动提交时保存本地草稿；在「任务与日志 → 讨论记录」搜索、按状态筛选、查看与复制正文。查看详情不会触发发布。
+- 发布前查本人顶层回复并保存发布意图；独立无重试 transport 发送一次，再读回确认。跨章节、跨轮重试和重启共享话题记录，不能靠删除草稿解除发布去重。
+- `discussions/` 位于既有应用数据 / 安装配置目录，按账号、课程、班级、原生空间和话题隔离。备份时应一并保留，尤其是未决发布意图。记录损坏时保留原文件并阻止新发布。
+
+当前支持标准主站章节入口到 groupweb v3 的网页合同；旧版、镜像域和无法确认身份的结构保留待处理。图片或附件题意尚未适配时，普通档位保留待处理。字数 / 业务拒绝如实记录；审核中、响应丢失或读回未定保留发布未知，不重复试发。平台明确拒绝的记录保留待处理，当前不自动清除拒绝记录后重试。
+
+2026-10-19 对用户选定的三个真实话题完成发布、正文读回、任务及章节确认、再次运行去重验收；使用预先审阅的正文核验协议，未调用外部 AI 服务。离线测试覆盖四档生成、异常恢复和隔离行为；不把这一条成功样例推广为所有课程 / 页面都已适配。
 
 ## 来源与许可
 

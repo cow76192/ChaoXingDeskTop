@@ -29,6 +29,11 @@ def create_client(config, channel, courses_only=False):
     SessionManager.get_session().control = client.control
     client.desktop_work_lock = threading.Lock()
     client.desktop_media_context = threading.local()
+    if not courses_only:
+        from api.discussion import DiscussionAdapter
+        from .discussion import DiscussionRunner
+        from .config import data_dir
+        client.desktop_discussion = DiscussionRunner(config, channel, answers, DiscussionAdapter(client), data_dir())
     def media_progress(**values):
         task_id = getattr(client.desktop_media_context, 'task_id', None)
         if task_id:
@@ -41,6 +46,10 @@ def process_job(client, course, job, info, speed):
     checkpoint(client)
     info = job.get('_job_info', info)
     kind = job["type"]
+    if kind == 'discussion':
+        context = client.desktop_media_context
+        return client.desktop_discussion.process(course, job, info, getattr(context, 'task_id', '') or '',
+                                                  getattr(context, 'chapter', '') or '')
     if kind == 'video' and attachment_kind(job) == 'audio':
         kind = 'audio'
     if kind == 'audio':
@@ -73,11 +82,13 @@ def process_chapter(client, course, point, speed, task_id=None):
     context = getattr(client, 'desktop_media_context', None)
     if context is not None:
         context.task_id = task_id
+        context.chapter = point.get('title', '')
     try:
         return _process_chapter(client, course, point, speed)
     finally:
         if context is not None:
             context.task_id = None
+            context.chapter = None
 
 
 def _process_chapter(client, course, point, speed):
@@ -101,6 +112,13 @@ def _process_chapter(client, course, point, speed):
             # BaseException and must still interrupt the whole run.
             logger.warning('任务点「{}」处理异常：{}: {}', name, type(exc).__name__, exc)
             result = StudyResult.ERROR
+        from .discussion import DiscussionOutcome
+        if isinstance(result, DiscussionOutcome):
+            if result.verification:
+                return ChapterResult.PENDING
+            if result.task_status not in ('confirmed', 'not_applicable'):
+                outcome = ChapterResult.PENDING
+            continue
         if result == StudyResult.VERIFICATION_REQUIRED:
             logger.warning('会话需要人工验证，章节「{}」保留待完成；还有 {} 个任务点未执行。',
                            title, len(jobs) - index - 1)
