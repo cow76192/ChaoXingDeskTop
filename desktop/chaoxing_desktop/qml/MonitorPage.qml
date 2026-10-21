@@ -52,6 +52,7 @@ ColumnLayout {
                         TabButton { text: "章节任务" }
                         TabButton { text: "逐题结果（" + bridge.summary.questionCount + "）" }
                         TabButton { text: "讨论记录（" + bridge.summary.discussionCount + "）" }
+                        TabButton { text: "投票／问卷（" + bridge.summary.activityCount + "）" }
                     }
                     Text { text: bridge.summary.busy ? "运行中" : "当前任务"; font.pixelSize: 12; color: "#627086" }
                 }
@@ -97,6 +98,7 @@ ColumnLayout {
                 }
                 QuestionResults { id: questions; visible: resultTabs.currentIndex === 1; Layout.fillWidth: true; Layout.fillHeight: true }
                 DiscussionResults { visible: resultTabs.currentIndex === 2; Layout.fillWidth: true; Layout.fillHeight: true }
+                ActivityResults { visible: resultTabs.currentIndex === 3; Layout.fillWidth: true; Layout.fillHeight: true }
             }
         }
         Rectangle {

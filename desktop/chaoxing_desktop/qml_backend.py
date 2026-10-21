@@ -17,6 +17,7 @@ from .models import LogModel, LogFilter, TaskModel, STATUS, TERMINAL
 from .log_store import LogStore, AsyncLogStore
 from .question_model import QuestionModel, QuestionFilter
 from .discussion_model import DiscussionModel, DiscussionFilter, safe_record as safe_discussion
+from .activity_model import ActivityModel, ActivityFilter, safe_record as safe_activity, detail_text
 from .query_result import safe_record
 from .providers import PROVIDER_SPECS
 from .accounts import AccountStore, parse_cookie, write_cookie
@@ -92,6 +93,9 @@ class Backend(QObject):
         self._discussion_model = DiscussionModel(self)
         self._discussion_filter = DiscussionFilter(self._discussion_model, self)
         self.discussion_preview = dict(content='', level='', reason='输入示例主题，预览不会发布到课程。')
+        self._activity_model = ActivityModel(self)
+        self._activity_filter = ActivityFilter(self._activity_model, self)
+        self.activity_preview = dict(content='', reason='选择策略后预览混合问卷；不会读取课程或提交。')
         self.bank_status = "尚未检查"
         self.log_store = AsyncLogStore(self)
         self.log_store.failed.connect(self.on_log_failure)
@@ -172,6 +176,14 @@ class Backend(QObject):
         return dict(self.discussion_preview)
 
     @Property(QObject, constant=True)
+    def activityModel(self):
+        return self._activity_filter
+
+    @Property('QVariantMap', notify=changed)
+    def activityPreview(self):
+        return dict(self.activity_preview)
+
+    @Property(QObject, constant=True)
     def logModel(self):
         return self._log_filter
 
@@ -202,6 +214,12 @@ class Backend(QObject):
                     discussionStats={key: sum(r['stage'] == key for r in self._discussion_model.rows)
                                      for key in ('draft', 'published', 'existing', 'publish_unknown', 'pending', 'skipped')},
                     discussionConfirmed=sum(r['task_status'] == 'confirmed' for r in self._discussion_model.rows),
+                    activityCount=len(self._activity_model.rows), activityEvicted=self._activity_model.evicted,
+                    activityStats={key: sum(r['stage'] == key for r in self._activity_model.rows)
+                                   for key in ('draft', 'submitted', 'existing', 'submit_unknown', 'pending', 'rejected')},
+                    activitySources={key: sum(a['valid'] and a['source'] == key for r in self._activity_model.rows
+                                              for a in r['answers']) for key in ('ai', 'random', 'fixed')},
+                    activityConfirmed=sum(r['task_status'] == 'confirmed' for r in self._activity_model.rows),
                     mode=self.mode, demo=self.demo_mode, courseCount=len(self.courses),
                     selectedCount=len(self.selected), hiddenCount=hidden,
                     courseSearch=self.search,
@@ -251,6 +269,7 @@ class Backend(QObject):
 
     def reset_account_view(self):
         self._discussion_model.clear()
+        self._activity_model.clear()
         self.courses, self.selected, self.course_identity = [], set(), None
         self.search, self.demo_mode = '', False
         self.operation_account = ''
@@ -444,6 +463,14 @@ class Backend(QObject):
                 raise ValueError('请先启用并配置 AI 服务，或选择固定回复好。')
             validate(isolated, services=True)
             config = isolated
+        if action == 'activity_preview':
+            isolated = parse_text(serialize(config))
+            isolated['question_bank']['providers'] = ''
+            isolated['notification']['provider'] = ''
+            if isolated['ai']['enabled'] != 'true':
+                raise ValueError('请先启用并配置 AI，或选择随机选择与固定好。')
+            validate(isolated, services=True)
+            config = isolated
         self.operation, self.outcome = action, False
         self.operation_account = self.account_store.active if self.account_store and not demo and action in ('courses', 'run') else ''
         payload = to_payload(config)
@@ -456,6 +483,7 @@ class Backend(QObject):
             self._task_model.reset([])
             self._question_model.clear()
             self._discussion_model.clear()
+            self._activity_model.clear()
             self.reset_question_filters()
             self.pageRequested.emit(4)
         self.mode = "离线演示 · 示例数据" if demo else "检查 AI 连接" if action == "check_ai" else "正在连接超星"
@@ -465,6 +493,10 @@ class Backend(QObject):
             command['topic'] = topic
             self.mode = '讨论预览 · 请求已配置 AI 服务'
             self.notify('正在生成讨论预览，将请求已配置 AI 服务，不访问课程或发布接口。')
+        if action == 'activity_preview':
+            command['topic'] = topic
+            self.mode = '投票／问卷预览 · 请求已配置 AI 服务'
+            self.notify('正在生成活动示例预览，不读取课程、不提交、不写入活动记录。')
         if self.operation_account:
             command.update(account_id=self.operation_account,
                            account_uid=self.account_store.get(self.operation_account)['uid'])
@@ -503,6 +535,45 @@ class Backend(QObject):
     @Slot(str, str)
     def filterDiscussions(self, query, stage):
         self._discussion_filter.set_filter(query, stage)
+
+    @Slot(str, str)
+    def filterActivities(self, query, stage):
+        self._activity_filter.set_filter(query, stage)
+
+    @Slot(str, result='QVariantMap')
+    def activityDetail(self, record_id):
+        return self._activity_model.detail(record_id)
+
+    @Slot(str)
+    def copyActivity(self, record_id):
+        from PySide6.QtGui import QGuiApplication
+        record = self._activity_model.detail(record_id)
+        if record:
+            QGuiApplication.clipboard().setText(record['detailText'])
+            self.notify('活动逐题草稿已复制。')
+
+    @Slot(str)
+    def previewActivity(self, topic):
+        def run():
+            if self.controller.active:
+                raise ValueError('请先结束当前任务，再预览。')
+            if not topic.strip() or len(topic) > 2000:
+                raise ValueError('请填写不超过 2000 字符的示例文本题干。')
+            validate(self.config)
+            cfg = self.config['activity']
+            if cfg['choice_strategy'] == 'random' and cfg['text_strategy'] == 'fixed_good':
+                from types import SimpleNamespace
+                from .activity import ActivityGenerator, preview_context
+                from .answers import AnswerRouter
+                ctx = preview_context(topic.strip())
+                answers = ActivityGenerator(AnswerRouter(to_payload(self.config), SimpleNamespace(control=None))).generate(ctx, cfg)
+                record = dict(title=ctx.title, course='', chapter='', submit_status='draft', task_status='pending',
+                              reason='完全本地 · AI 调用 0 次 · 不读取课程或提交', questions=ctx.questions, answers=answers)
+                self.activity_preview = dict(content=detail_text(record), reason=record['reason'])
+                self.changed.emit()
+                return
+            self.begin('activity_preview', topic=topic.strip())
+        self.execute(run)
 
     @Slot(str, result='QVariantMap')
     def discussionDetail(self, record_id):
@@ -618,6 +689,18 @@ class Backend(QObject):
         if event.get('run_id', self.controller.run_id) != self.controller.run_id:
             return
         kind = event.get("type")
+        if kind in ('activity_result', 'activity_preview'):
+            if event['record']['run_id'] != self.controller.run_id:
+                return
+            record = safe_activity(event['record'], lambda text: self.redact(self.log_redactor(text)))
+            if kind == 'activity_preview':
+                self.outcome = True
+                self.activity_preview = dict(content=detail_text(record), reason=record['reason'])
+                self.mode = '投票／问卷预览已完成'
+                self.notify('预览已完成，请逐题检查来源与校验结果。', 'success')
+            elif self._activity_model.upsert(record) and not self._progress_timer.isActive():
+                self._progress_timer.start()
+            return
         if kind == 'discussion_result':
             if event['record']['run_id'] != self.controller.run_id:
                 return

@@ -25,7 +25,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Build environment differs from requirements-lo
 if ($LASTEXITCODE -ne 0) { throw 'Dependency check failed' }
 & $taskPython -m unittest discover -s tests -p 'test_*.py'
 if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
-foreach ($taskUiTest in @('qml_ui_smoke.py', 'accounts_ui_smoke.py', 'audit_ui_smoke.py')) {
+foreach ($taskUiTest in @('qml_ui_smoke.py', 'accounts_ui_smoke.py', 'audit_ui_smoke.py', 'activity_ui_smoke.py')) {
     & $taskPython (Join-Path 'tests' $taskUiTest)
     if ($LASTEXITCODE -ne 0) { throw "Source UI acceptance failed: $taskUiTest" }
 }

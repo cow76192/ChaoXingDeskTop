@@ -26,6 +26,7 @@ with tempfile.TemporaryDirectory() as data:
     assert events[-1].get('matching_ready'), events
     assert events[-1].get('ocs_ready') is True, events
     assert events[-1].get('discussion_ready') is True, events
+    assert events[-1].get('activity_ready') is True, events
     print("Frozen core, font resources, v2 bank parameters, PNG Base64 codec, OCR and discussion modules passed.")
 if "--worker-only" in sys.argv:
     raise SystemExit(0)

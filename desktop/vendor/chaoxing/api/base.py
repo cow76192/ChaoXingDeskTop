@@ -468,6 +468,7 @@ class Chaoxing:
 
             for job in _job_list:
                 job['_job_info'] = dict(_job_info)
+                job['_job_info']['card_index'] = _possible_num
             job_list += _job_list
             job_info.update(_job_info)
 

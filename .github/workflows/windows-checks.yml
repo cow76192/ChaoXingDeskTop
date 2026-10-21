@@ -42,6 +42,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Service scrolling and media UI failed' }
           .venv-ci/Scripts/python.exe tests/audit_ui_smoke.py
           if ($LASTEXITCODE -ne 0) { throw 'Audit UI regression failed' }
+          .venv-ci/Scripts/python.exe tests/activity_ui_smoke.py build/ci-checks/activity
+          if ($LASTEXITCODE -ne 0) { throw 'Activity UI regression failed' }
           $env:QT_QPA_PLATFORM = 'offscreen'
           $env:QSG_RHI_BACKEND = 'software'
           .venv-ci/Scripts/python.exe run.py --smoke-test build/ci-checks/source

@@ -34,6 +34,9 @@ def create_client(config, channel, courses_only=False):
         from .discussion import DiscussionRunner
         from .config import data_dir
         client.desktop_discussion = DiscussionRunner(config, channel, answers, DiscussionAdapter(client), data_dir())
+        from api.activity import ActivityAdapter
+        from .activity import ActivityRunner
+        client.desktop_activity = ActivityRunner(config, channel, answers, ActivityAdapter(client), data_dir())
     def media_progress(**values):
         task_id = getattr(client.desktop_media_context, 'task_id', None)
         if task_id:
@@ -46,6 +49,10 @@ def process_job(client, course, job, info, speed):
     checkpoint(client)
     info = job.get('_job_info', info)
     kind = job["type"]
+    if kind == 'activity':
+        context = client.desktop_media_context
+        return client.desktop_activity.process(course, job, info, getattr(context, 'task_id', '') or '',
+                                               getattr(context, 'chapter', '') or '')
     if kind == 'discussion':
         context = client.desktop_media_context
         return client.desktop_discussion.process(course, job, info, getattr(context, 'task_id', '') or '',
@@ -113,7 +120,8 @@ def _process_chapter(client, course, point, speed):
             logger.warning('任务点「{}」处理异常：{}: {}', name, type(exc).__name__, exc)
             result = StudyResult.ERROR
         from .discussion import DiscussionOutcome
-        if isinstance(result, DiscussionOutcome):
+        from .activity import ActivityOutcome
+        if isinstance(result, (DiscussionOutcome, ActivityOutcome)):
             if result.verification:
                 return ChapterResult.PENDING
             if result.task_status not in ('confirmed', 'not_applicable'):

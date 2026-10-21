@@ -480,8 +480,6 @@ def build_answers(config, channel):
             else:
                 bank = Tiku.get_tiku_from_config(bank_config)
                 bank.init_tiku()
-            # GO already enforces its own minimum interval inside the adapter.
-            bank.desktop_interval = 0 if name == "TikuGo" else float(conf.get(prefix + "_min_interval", config["tiku"]["delay"]))
             if bank.DISABLE:
                 raise RuntimeError("服务不可用")
             banks.append((name, bank))

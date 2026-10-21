@@ -11,8 +11,8 @@ ColumnLayout {
         Layout.fillWidth: true; Layout.preferredHeight: 78; radius: 12; color: "#edf2fc"
         ColumnLayout {
             anchors.fill: parent; anchors.margins: 16; spacing: 8
-            Text { text: tabs.currentIndex === 3 ? "01 识别话题     →     02 检查本人回复     →     03 生成草稿     →     04 发布与核验" : "01 题库查询     →     02 AI 补全     →     03 人工补全     →     04 随机补全"; Layout.fillWidth: true; wrapMode: Text.Wrap; font.pixelSize: 14; font.bold: true; color: "#344d78" }
-            Text { text: tabs.currentIndex === 3 ? "只处理章节必做讨论 · 发布与任务完成分别确认，未知结果不重复提交" : "仅处理前一步未解决的题目 · 随机补全默认关闭，自动提交独立控制"; Layout.fillWidth: true; wrapMode: Text.Wrap; font.pixelSize: 12; color: "#475569" }
+            Text { text: tabs.currentIndex === 4 ? "01 发现活动     →     02 核实本人状态     →     03 逐题草稿     →     04 提交与分步核验" : tabs.currentIndex === 3 ? "01 识别话题     →     02 检查本人回复     →     03 生成草稿     →     04 发布与核验" : "01 题库查询     →     02 AI 补全     →     03 人工补全     →     04 随机补全"; Layout.fillWidth: true; wrapMode: Text.Wrap; font.pixelSize: 14; font.bold: true; color: "#344d78" }
+            Text { text: tabs.currentIndex === 4 ? "选择题与文本题分别配置 · 自动提交独立控制 · 提交未知时仅只读核验" : tabs.currentIndex === 3 ? "只处理章节必做讨论 · 发布与任务完成分别确认，未知结果不重复提交" : "仅处理前一步未解决的题目 · 随机补全默认关闭，自动提交独立控制"; Layout.fillWidth: true; wrapMode: Text.Wrap; font.pixelSize: 12; color: "#475569" }
         }
     }
     RowLayout {
@@ -23,6 +23,7 @@ ColumnLayout {
         TabButton { text: "答案处理" }
         TabButton { text: "结束通知" }
         TabButton { text: "讨论任务" }
+        TabButton { text: "投票／问卷" }
     }
     ActionButton { objectName: "service_ai_link"; text: "AI 设置"; visible: tabs.currentIndex === 0; onClicked: services.contentItem.contentY = Math.max(0, aiPanel.y - 8) }
     }
@@ -95,6 +96,7 @@ ColumnLayout {
         FormPage { objectName: "answersScroll"; groups: bridge.schema.answers }
         FormPage { objectName: "notificationScroll"; groups: bridge.schema.notification }
         DiscussionSettings {}
+        ActivitySettings {}
     }
     Dialog {
         id: bankConfirm; property string providerKey: ""

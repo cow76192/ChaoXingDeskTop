@@ -129,6 +129,9 @@ class Controller(QObject):
         if kind == 'discussion_result':
             from .discussion_model import valid_record
             return valid_record(event.get('record'))
+        if kind in ('activity_result', 'activity_preview'):
+            from .activity_model import valid_record
+            return valid_record(event.get('record'))
         if kind == 'discussion_preview':
             return (isinstance(event.get('content'), str) and 0 < len(event['content']) <= 1000
                     and event.get('level') in ('concise', 'medium', 'detailed', 'fixed_good')

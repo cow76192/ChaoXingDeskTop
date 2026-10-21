@@ -24,7 +24,6 @@ class FontDecoder:
         Args:
             html_content: 包含加密字体信息的HTML内容
         """
-        self.html_content = html_content
         self.__font_map: Optional[Dict] = None
 
         if html_content:

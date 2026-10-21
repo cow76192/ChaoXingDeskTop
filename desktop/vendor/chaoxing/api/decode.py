@@ -174,13 +174,13 @@ def decode_course_card(html_text: str) -> Tuple[List[Dict[str, Any]], Dict[str, 
     # 提取mArg参数
     assignment = re.search(r"\bmArg\s*=\s*(?=\{)", html_text)
     if not assignment:
-        return _discussion_cards(html_text, []), {}
+        return _discussion_cards(html_text, []) + _activity_cards(html_text, []), {}
 
     # 解析JSON数据
     cards_data, _ = json.JSONDecoder().raw_decode(html_text[assignment.end():])
 
     if not cards_data:
-        return [], {}
+        return _discussion_cards(html_text, []) + _activity_cards(html_text, []), {}
 
     # 提取任务信息
     job_info = _extract_job_info(cards_data)
@@ -194,8 +194,58 @@ def decode_course_card(html_text: str) -> Tuple[List[Dict[str, Any]], Dict[str, 
     existing = {str(j.get('mid', '')) for j in discussions}
     job_list = [j for j in job_list if not (j['type'] == 'discussion' and str(j.get('mid', '')) in existing)]
     job_list.extend(discussions)
+    activities = _activity_cards(html_text, cards)
+    activity_mids = {j.get('mid') for j in activities if j.get('mid')}
+    job_list = [j for j in job_list if not (j['type'] == 'activity' and j.get('mid') in activity_mids)]
+    job_list.extend(activities)
 
     return job_list, job_info
+
+
+def _activity_job(card, *, linked=True):
+    prop = card.get('property') or {}
+    required = card.get('job') if type(card.get('job')) is bool else None
+    module = str(prop.get('module') or card.get('module') or '')
+    return dict(type='activity', required=required, isPassed=card.get('isPassed') is True,
+                server_finished=bool(linked and card.get('jobid') and not card.get('job')),
+                page_variant='insertvote-v2' if module == 'insertvote' else 'unsupported',
+                mid=str(prop.get('mid') or card.get('mid') or ''),
+                jobid=str(card.get('jobid') or prop.get('jobid') or ''),
+                name=prop.get('title') or '章节投票／问卷', property=dict(prop),
+                enc=card.get('enc', ''), jtoken=card.get('jtoken', ''), microTopicId=card.get('microTopicId', ''))
+
+
+def _activity_cards(html_text, cards):
+    jobs = []
+    for frame in BeautifulSoup(html_text, 'lxml').select('iframe'):
+        source = urlsplit(frame.get('src', ''))
+        module = frame.get('module', '')
+        known_path = source.path in ('/ananas/modules/zt/vote/index-pc-new.html',
+                                     '/ananas/modules/zt/vote/index-pc.html',
+                                     '/ananas/modules/questionnaire/index.html')
+        if module not in ('insertvote', 'questionnaire') and not known_path:
+            continue
+        trusted = (not source.netloc or source.hostname == 'mooc1.chaoxing.com') and source.scheme in ('', 'https')
+        try:
+            data = json.loads(frame.get('data', '{}'))
+            if not isinstance(data, dict) or not trusted:
+                raise ValueError
+        except (ValueError, TypeError):
+            jobs.append(_activity_job({}, linked=False))
+            continue
+        mid = str(data.get('mid') or '')
+        matches = [c for c in cards if mid and str((c.get('property') or {}).get('mid') or c.get('mid') or '') == mid]
+        if len(matches) == 1:
+            card = dict(matches[0])
+            # Clone iframe IDs and native attachment IDs can differ. Keep the
+            # server attachment authoritative and retain source evidence.
+            card['property'] = dict(data, **(card.get('property') or {}))
+        else:
+            card = dict(property=dict(data, module=module or 'questionnaire'))
+        job = _activity_job(card, linked=len(matches) == 1)
+        job['entry_property'] = data
+        jobs.append(job)
+    return jobs
 
 
 def _discussion_job(card):
@@ -269,6 +319,9 @@ def _process_attachment_cards(cards: List[Dict[str, Any]]) -> List[Dict[str, Any
     job_list = []
 
     for card in cards:
+        if attachment_kind(card) == 'activity':
+            job_list.append(_activity_job(card))
+            continue
         if attachment_kind(card) == 'discussion':
             job_list.append(_discussion_job(card))
             continue
@@ -343,7 +396,8 @@ def _process_attachment_cards(cards: List[Dict[str, Any]]) -> List[Dict[str, Any
 def attachment_kind(card: Dict[str, Any]) -> str:
     """Resolve player module first; legacy cards can call MP3 resources video."""
     prop = card.get('property') or {}
-    modules = {'insertaudio': 'audio', 'insertvideo': 'video', 'insertdoc': 'document', 'insertbbs': 'discussion'}
+    modules = {'insertaudio': 'audio', 'insertvideo': 'video', 'insertdoc': 'document', 'insertbbs': 'discussion',
+               'insertvote': 'activity', 'questionnaire': 'activity'}
     module = str(prop.get('module') or card.get('module') or '').lower()
     if module in modules:
         return modules[module]

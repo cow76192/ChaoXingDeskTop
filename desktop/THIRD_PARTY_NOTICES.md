@@ -1,6 +1,10 @@
 # 来源与许可
 
-桌面版：ChaoxingDesktop 0.3.7，GPL-3.0。完整许可见 LICENSE。
+桌面版：ChaoxingDesktop 0.3.9，GPL-3.0。完整许可见 LICENSE。
+
+0.3.9 新增独立实现的投票／问卷策略、逐题验证、草稿与提交意图存储、QML 设置及记录界面；平台适配改动位于 api/activity.py、api/decode.py 与 api/base.py。协议与支持边界见 [ACTIVITY_PROTOCOL.md](vendor/chaoxing/api/ACTIVITY_PROTOCOL.md)。删除无调用方的限速副本与字体原始 HTML 成员，未新增运行依赖。
+
+0.3.8 新增独立实现的讨论回复策略、持久化发布去重及 QML 界面，平台协议适配位于 api/discussion.py；协议与支持边界见 [DISCUSSION_PROTOCOL.md](vendor/chaoxing/api/DISCUSSION_PROTOCOL.md)。未新增运行依赖。
 
 0.3.7 同版本滚动修订：课程列表、题库与 AI 和设置表单共用独立实现的 QML 滚动组件，统一为每格 136 像素；保留触控板像素滚动，新增服务页真实滚轮事件验收。未新增依赖或第三方源码。
 
@@ -36,9 +40,9 @@
 
 2026-10-14 性能与稳定性修复：api/base.py 的视频计时改用单调时钟，限制结束后的完成核验次数；api/live_process.py 的时长提交连续失败时返回失败，交由桌面章节调度重试。
 
-2026-10-17 媒体完成确认修复：对照 OCS 5.0 的 cx.ts 真实播放器结束事件处理，并只读核对超星公开 videojs-ext.min.js 的 ended → isdrag=4 映射，修复正常片尾遗漏结束上报；按任务卡上报间隔和真实时间进行有限确认。未复制或执行远端 JavaScript，未新增依赖。排查及参考链接见 docs/视频结束上报与平台确认排查.md。
+2026-10-17 媒体完成确认修复：对照 OCS 5.0 的 cx.ts 真实播放器结束事件处理，并只读核对超星公开 videojs-ext.min.js 的 ended → isdrag=4 映射，修复正常片尾遗漏结束上报；按任务卡上报间隔和真实时间进行有限确认。未复制或执行远端 JavaScript，未新增依赖。
 
-2026-10-19 音频及资源格式修复：参考 OCS 5.0 的 cx.ts 中 property.module、属性任务标识与真实媒体/文档分类方式，独立补全旧视频卡中的音频识别，校验媒体、文档和阅读响应，并隔离每张任务卡参数。未复制或执行远端 TypeScript，未新增依赖。排查与验证范围见 docs/音频与其他资源格式排查.md。
+2026-10-19 音频及资源格式修复：参考 OCS 5.0 的 cx.ts 中 property.module、属性任务标识与真实媒体/文档分类方式，独立补全旧视频卡中的音频识别，校验媒体、文档和阅读响应，并隔离每张任务卡参数。未复制或执行远端 TypeScript，未新增依赖。
 
 0.2.6 根据用户提供的言溪 v2 配置示例修正 api/answer.py 的 POST JSON 请求、响应处理与 Token 切换，并修复 LIKE 关闭重试时完全不发请求的问题。题库接口地址与超时由桌面独立配置传入；api/base.py 增加媒体进度事件回调，api/decode.py 识别音频任务，桌面 QML 展示并发章节的时长进度。新增桌面脱敏日志持久化、目录设置及按应用命名删除日志。
 

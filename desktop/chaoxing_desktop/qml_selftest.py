@@ -185,8 +185,42 @@ def start_smoke(app, engine, backend, destination):
                 phase[0] = 15
             elif phase[0] == 15:
                 snapshot('讨论记录')
+                backend.setValue('activity', 'choice_strategy', 'random')
+                backend.setValue('activity', 'text_strategy', 'fixed_good')
+                backend.previewActivity('你对课程有什么建议？')
+                assert '好' in backend.activityPreview['content']
+                assert not backend.controller.active, 'Local activity preview started a worker'
+                root.setProperty('pageIndex', 2)
+                root.findChild(QObject, 'serviceTabs').setProperty('currentIndex', 4)
+                root.setWidth(1280); root.setHeight(860)
+                phase[0] = 16
+            elif phase[0] == 16:
+                snapshot('投票问卷设置与本地预览')
+                root.setWidth(980); root.setHeight(700)
+                phase[0] = 17
+            elif phase[0] == 17:
+                snapshot('投票问卷设置-980')
+                from .activity import ActivityGenerator, preview_context
+                from .answers import AnswerRouter
+                from .config import to_payload
+                from types import SimpleNamespace
+                ctx = preview_context('你对课程有什么建议？')
+                answers = ActivityGenerator(AnswerRouter(to_payload(backend.config), SimpleNamespace(control=None))).generate(ctx, backend.config['activity'])
+                from .activity_model import safe_record
+                record = safe_record(dict(id='offline-activity', run_id=backend.controller.run_id, task_id='offline-task',
+                    course='课程 · 离线验收', chapter='章节问卷', title=ctx.title, kind='survey', stage='draft',
+                    submit_status='draft', task_status='pending', reason='离线混合问卷，未调用模型或提交。',
+                    elapsed_ms=0, questions=ctx.questions, answers=answers), lambda text: text)
+                backend.on_event(dict(type='activity_result', record=record))
+                assert backend.summary['activityCount'] >= 1
+                backend.changed.emit()
+                root.setProperty('pageIndex', 4)
+                root.findChild(QObject, 'resultTabs').setProperty('currentIndex', 3)
+                phase[0] = 18
+            elif phase[0] == 18:
+                snapshot('投票问卷记录')
                 assert not warnings, "QML warnings: " + "\n".join(warnings[:6])
-                finish(True, "QML and worker: accounts, 9 demo chapters, pause/stop, settings, discussion preview (zero AI), narrow discussion layout and discussion results passed.")
+                finish(True, "QML and worker: accounts, 9 demo chapters, pause/stop, discussion and activity settings, zero-AI local previews, narrow layouts and independent result records passed.")
         except Exception as exc:
             finish(False, str(exc))
     timer.timeout.connect(tick)

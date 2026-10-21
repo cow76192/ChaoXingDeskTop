@@ -32,6 +32,9 @@ class Channel:
         if event_type == 'discussion_result':
             from .discussion_model import safe_record as safe_discussion
             values = dict(record=safe_discussion(values['record'], self.redactor))
+        if event_type in ('activity_result', 'activity_preview'):
+            from .activity_model import safe_record as safe_activity
+            values = dict(record=safe_activity(values['record'], self.redactor))
         values.setdefault('run_id', self.run_id)
         with self.lock:
             self.output.write(json.dumps({"type": event_type, **values}, ensure_ascii=False) + "\n")
@@ -138,6 +141,17 @@ def demo(channel, command):
                 stage='draft', task_status='pending', elapsed_ms=0,
                 reason='离线示例草稿，未调用 AI、未发布。开启真实讨论功能后按独立配置处理。',
                 content='大学生可以通过扎实学习专业知识、参与社会实践与志愿服务，在具体行动中提升能力、承担责任。'))
+            from .activity import ActivityGenerator, preview_context
+            from .answers import AnswerRouter
+            context = preview_context('你对本课程有什么建议？')
+            local_cfg = dict(choice_strategy='random', text_strategy='fixed_good', reply_level='medium')
+            answers = ActivityGenerator(AnswerRouter(command['config'], channel)).generate(context, local_cfg)
+            channel.send('activity_result', record=dict(
+                id=task['id']+':activity', run_id=channel.run_id, task_id=task['id'], course=task['course'],
+                chapter='混合问卷 · 离线演示', title=context.title, kind='survey', stage='draft',
+                submit_status='draft', task_status='pending', elapsed_ms=0,
+                reason='离线示例：随机选择 + 固定好，AI 调用 0 次，未访问课程或提交。',
+                questions=context.questions, answers=answers))
         channel.send("task", id=task["id"], status="success")
     channel.send("done", success=len(tasks), failed=0, skipped=0, pending=0, demo=True)
 
@@ -386,9 +400,18 @@ def main() -> int:
                     or len(topic_key('probe', 'course', 'class', 'space', 'topic')) != 64
                     or not callable(DiscussionAdapter.publish_once)):
                 raise RuntimeError('讨论生成、存储或平台适配模块检查失败')
+            from api.activity import ActivityAdapter
+            from .activity import ActivityGenerator, preview_context
+            from .activity_store import activity_key
+            local_answers = ActivityGenerator(policy_router).generate(preview_context('离线问卷检查'),
+                dict(choice_strategy='random', text_strategy='fixed_good', reply_level='medium'))
+            if (local_answers[-1]['text'] != '好' or not all(a['valid'] for a in local_answers)
+                    or len(activity_key('probe', 'course', 'class', 'space', 'activity')) != 64
+                    or not callable(ActivityAdapter.submit_once)):
+                raise RuntimeError('活动生成、存储或平台适配模块检查失败')
             channel.send("probe", ocs_ready=True, message="核心、字体资源、题库 v2 参数、图片编码及验证码识别正常",
                          font_entries=len(fonthash_dao.char_map), bank_protocol='v2-text-and-images',
-                         matching_ready=True, captcha_ready=True, review_policy_ready=True, discussion_ready=True)
+                         matching_ready=True, captcha_ready=True, review_policy_ready=True, discussion_ready=True, activity_ready=True)
         elif command.get('action') == 'check_bank':
             load_core(channel)
             from .answers import build_answers
@@ -416,6 +439,19 @@ def main() -> int:
                 '', cfg['discussion']['reply_level'], ('preview',))
             channel.send('discussion_preview', content=channel.redactor(content),
                          level=cfg['discussion']['reply_level'])
+        elif command.get('action') == 'activity_preview':
+            load_core(channel)
+            from .answers import AnswerRouter, AIClient
+            from .activity import ActivityGenerator, preview_context
+            cfg = command['config']
+            local = cfg['activity']['choice_strategy'] == 'random' and cfg['activity']['text_strategy'] == 'fixed_good'
+            ai = AIClient(cfg['ai']) if not local and cfg['ai']['enabled'] == 'true' else None
+            context = preview_context(str(command.get('topic', '')))
+            answers = ActivityGenerator(AnswerRouter(cfg, channel, ai=ai)).generate(context, cfg['activity'])
+            channel.send('activity_preview', record=dict(id='preview', run_id=channel.run_id, task_id='', course='', chapter='',
+                         title=context.title, kind='survey', stage='draft', submit_status='draft', task_status='pending',
+                         reason='示例预览，不读取课程、不提交、不写入生产去重记录。', elapsed_ms=0,
+                         questions=context.questions, answers=answers))
         elif command.get("demo"):
             demo(channel, command)
         else:

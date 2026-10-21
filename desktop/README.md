@@ -1,8 +1,8 @@
 # 桌面版使用与开发指南
 
-**版本：0.3.7** · Windows 10 / 11 x64 · Python + PySide6 / QML · GPL-3.0
+**版本：0.3.9** · Windows 10 / 11 x64 · Python + PySide6 / QML · GPL-3.0
 
-[项目首页](../README.md) · [下载安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/tag/v0.3.7) · [第三方声明](THIRD_PARTY_NOTICES.md)
+[项目首页](../README.md) · [下载安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/tag/v0.3.9) · [第三方声明](THIRD_PARTY_NOTICES.md)
 
 本文中的命令默认在 `desktop` 目录的 PowerShell 中执行。
 
@@ -95,6 +95,8 @@ python -m venv .venv-build
 .venv-build/Scripts/python.exe tests/qml_ui_smoke.py
 .venv-build/Scripts/python.exe tests/accounts_ui_smoke.py
 .venv-build/Scripts/python.exe tests/audit_ui_smoke.py
+.venv-build/Scripts/python.exe tests/activity_ui_smoke.py
+.venv-build/Scripts/python.exe tests/services_media_smoke.py build/services-media-smoke
 ```
 
 运行离线负载测试：
@@ -110,32 +112,39 @@ python -m venv .venv-build
 ### 构建程序
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -OutputDirectory dist/release-0.3.8/ChaoxingDesktop
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -OutputDirectory dist/release-0.3.9/ChaoxingDesktop
 ```
 
 构建脚本会准备 `.venv-build`、安装锁定依赖并核对依赖闭包，随后运行单元与源码界面回归、执行 PyInstaller，最后验收冻结 worker 与 QML 界面。
 
-程序输出至 `dist/release-0.3.8/ChaoxingDesktop/`。可通过 `-Wheelhouse <绝对路径>` 使用完整的本地 wheel 目录离线安装。依赖更新需要重新生成、审阅锁文件，并在干净环境中验证。
+程序输出至 `dist/release-0.3.9/ChaoxingDesktop/`。可通过 `-Wheelhouse <绝对路径>` 使用完整的本地 wheel 目录离线安装。依赖更新需要重新生成、审阅锁文件，并在干净环境中验证。
 
 ### 生成安装包
 
 准备 [NSIS 编译器](https://nsis.sourceforge.io/Download)，将下方路径替换为本机的 `makensis.exe`：
 
 ```powershell
-.venv-build/Scripts/python.exe scripts/build_installer.py --app dist/release-0.3.8/ChaoxingDesktop --compiler "C:/Tools/NSIS/makensis.exe"
+.venv-build/Scripts/python.exe scripts/build_installer.py --app dist/release-0.3.9/ChaoxingDesktop --compiler "C:/Tools/NSIS/makensis.exe"
 ```
 
 产物默认写入项目根目录的 `release/`：
 
 ```text
-ChaoxingDesktop-0.3.8-Setup-win-x64.exe
-ChaoxingDesktop-0.3.8-source.zip
-ChaoxingDesktop-0.3.8-installer-SHA256.json
+ChaoxingDesktop-0.3.9-Setup-win-x64.exe
+ChaoxingDesktop-0.3.9-source.zip
+ChaoxingDesktop-0.3.9-installer-SHA256.json
 ```
 
 安装包包含完整程序、对应源码 ZIP、许可和第三方声明，NSIS 编译器不随包分发。生成安装包前会核对程序版本、源码与产物哈希，以及单元、worker、GUI 验收标记；跳过 GUI 的构建不能用于正式发布。修改构建输入后，需要重新构建和验收。
 
 安装器与便携打包共用 `scripts/source_bundle.py` 的公共文件清单，不收集历史计划、截图、验收文档、用户数据或临时文件。升级时只删除 `scripts/retired-runtime-0.3.5.txt` 列出的具体废弃运行文件，不使用通配符或递归删除，也不删除新程序仍包含的文件。
+
+## 0.3.9 更新与清理
+
+- 投票／问卷功能进入正式发行，使用方式与协议边界见下文。
+- 题库限速仅保留实际使用的 `request_interval`；删除无读取方的 `desktop_interval` 及其测试断言，回归直接核对传入适配器的请求参数。
+- 删除字体解码器的原始 HTML 缓存；保留服务凭据加密、日志脱敏、QML 动态绑定及平台兼容逻辑。
+- 同步当前版本和构建 / 下载入口；运行依赖与锁文件保持不变。
 
 ## 0.3.7 音频修复与清理
 
@@ -174,6 +183,19 @@ ChaoxingDesktop-0.3.8-installer-SHA256.json
 当前支持标准主站章节入口到 groupweb v3 的网页合同；旧版、镜像域和无法确认身份的结构保留待处理。图片或附件题意尚未适配时，普通档位保留待处理。字数 / 业务拒绝如实记录；审核中、响应丢失或读回未定保留发布未知，不重复试发。平台明确拒绝的记录保留待处理，当前不自动清除拒绝记录后重试。
 
 2026-10-19 对用户选定的三个真实话题完成发布、正文读回、任务及章节确认、再次运行去重验收；使用预先审阅的正文核验协议，未调用外部 AI 服务。离线测试覆盖四档生成、异常恢复和隔离行为；不把这一条成功样例推广为所有课程 / 页面都已适配。
+
+## 投票／问卷任务（0.3.9 新增）
+
+在「题库与 AI → 投票／问卷」启用活动处理，分别选择选择题策略、文本策略与 AI 回复水平，再独立决定是否自动提交。默认均关闭，测验与讨论的提交开关不影响活动。
+
+- 支持当前已核实的章节 `insertvote` 网页变体：同页纯文本单选、多选与简答／论述混合问卷。旧 questionnaire、复杂分支、矩阵、媒体题意与上传保留待处理。
+- 选择题支持 AI、随机、AI 失败后随机；文本支持 AI 精简／中等／详细，或精确固定 `好`。随机 + 固定好不要求 AI，不发起 AI 连接检查。文本 AI 失败不自动切换固定好。
+- 「示例预览」使用内置混合问卷；AI 策略请求当前服务，本地策略在界面内执行。预览不读取课程、不提交、不写生产去重记录。
+- 自动提交关闭时仅保存本地草稿。开启后整卷校验通过才发送一次；本人已有参与、目标变化、约束不符或结果未知均不盲目重投。
+- 「任务与日志 → 投票／问卷」支持搜索、按状态筛选、逐题查看与复制。来源、生成覆盖、提交确认、任务点和最终章节完成分别记录。
+- `activities/` 存放本地草稿与提交意图，备份应用数据时一并保留。未知意图或损坏记录禁止新提交；不能通过换策略或重启绕过去重。
+
+协议字段与明确边界见 [ACTIVITY_PROTOCOL.md](vendor/chaoxing/api/ACTIVITY_PROTOCOL.md)。离线验收包含 `tests/test_activity.py` 与 `tests/activity_ui_smoke.py`；冻结 worker 自检也覆盖活动模块。
 
 ## 来源与许可
 

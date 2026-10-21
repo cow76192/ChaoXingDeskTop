@@ -13,6 +13,8 @@ BANKS = tuple((spec.title, spec.id) for spec in PROVIDERS)
 CONFIG_VERSION = 1
 DISCUSSION_LEVELS = (("精简（约 50–100 字）", "concise"), ("中等（约 150–250 字）", "medium"),
                      ("详细（约 350–600 字）", "detailed"), ("固定回复一个字：好", "fixed_good"))
+ACTIVITY_CHOICES = (("AI 作答", "ai"), ("随机选择（本地）", "random"), ("AI 失败后随机", "ai_then_random"))
+ACTIVITY_TEXTS = (("AI 回复", "ai"), ("固定一个字：好（本地）", "fixed_good"))
 BANK_REVIEW_POLICIES = (("严格核验（默认）", "strict"),
                         ("跟随 AI 状态", "ai_dependent"),
                         ("选项优先（放宽题干）", "options_only"))
@@ -24,6 +26,7 @@ BOOLEAN_KEYS = {
     "tiku": ("submit",),
     "ai": ("enabled", "vision", "check_connection"),
     "discussion": ("enabled", "auto_submit"),
+    "activity": ("enabled", "auto_submit"),
     "desktop": ("manual_fallback", "random_fallback"),
     "question_bank": ("likeapi_search", "likeapi_vision", "likeapi_retry", "yanxi_query_variants"),
     "matching": ("fuzzy_options", "reuse_similar"),
@@ -69,6 +72,7 @@ def defaults() -> configparser.ConfigParser:
                    check_connection="true", timeout="60", retries="2"),
         "desktop": dict(manual_fallback="false", random_fallback="false"),
         "discussion": dict(enabled="false", reply_level="medium", auto_submit="false"),
+        "activity": dict(enabled="false", choice_strategy="ai", text_strategy="ai", reply_level="medium", auto_submit="false"),
         "logging": dict(directory=""),
         "matching": dict(bank_review_policy="strict", fuzzy_options="true", min_similarity="0.92", min_margin="0.08",
                          reuse_similar="true", title_similarity="0.96"),
@@ -205,6 +209,10 @@ def validate(config: configparser.ConfigParser, login: bool = False, services: b
         raise ValueError('题库答案审核策略无效，请选择严格核验、跟随 AI 状态或选项优先。')
     if config['discussion']['reply_level'] not in {value for _, value in DISCUSSION_LEVELS}:
         raise ValueError('讨论回复水平无效，请选择精简、中等、详细或固定好。')
+    for key, choices in (('choice_strategy', ACTIVITY_CHOICES), ('text_strategy', ACTIVITY_TEXTS),
+                         ('reply_level', DISCUSSION_LEVELS[:3])):
+        if config['activity'][key] not in {value for _, value in choices}:
+            raise ValueError('投票／问卷配置无效：' + key)
     if c["notopen_action"] not in ("retry", "ask", "continue"):
         raise ValueError("关闭章节策略应为 retry、ask 或 continue。")
     names = [s.strip() for s in config["question_bank"]["providers"].split(",") if s.strip()]

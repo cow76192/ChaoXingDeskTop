@@ -187,10 +187,10 @@ class BankProtocolTests(unittest.TestCase):
             captured.append(conf)
             return SimpleNamespace(init_tiku=lambda: None, DISABLE=False, _query=lambda q: 'A')
         with patch('api.answer.Tiku.get_tiku_from_config', side_effect=bank):
-            router = build_answers(to_payload(restored), Mock())
+            build_answers(to_payload(restored), Mock())
         self.assertEqual([c['request_timeout'] for c in captured], ['22', '33', '44', '55'])
         self.assertEqual([c['tokens'] for c in captured[:2]], ['y', 'l'])
-        self.assertEqual([b.desktop_interval for _, b in router.banks], [2, 3, 4, 0])
+        self.assertEqual([c['request_interval'] for c in captured[:3]], ['2', '3', '4'])
 
     def test_legacy_interval_is_migrated_without_overwriting_new_values(self):
         conf = parse_text('[tiku]\ndelay=7\n[question_bank]\nlike_min_interval=3\n')

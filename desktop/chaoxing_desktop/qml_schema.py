@@ -1,5 +1,5 @@
 """Declarative field metadata shared by the QML settings pages."""
-from .config import BANK_REVIEW_POLICIES, DISCUSSION_LEVELS
+from .config import BANK_REVIEW_POLICIES, DISCUSSION_LEVELS, ACTIVITY_CHOICES, ACTIVITY_TEXTS
 
 
 def field(title, section, key, kind="text", low=0, high=100, choices=(), hint=""):
@@ -12,6 +12,17 @@ def group(title, description, fields):
 
 
 SCHEMA = {
+    "activity": [group("投票／问卷", "独立的活动处理与提交开关，默认均关闭。仅处理章节中已核实的必做活动。", [
+        field("启用投票／问卷处理", "activity", "enabled", "bool"),
+        field("选择题策略", "activity", "choice_strategy", "choice", choices=ACTIVITY_CHOICES,
+              hint="随机完全本地；仅显式选择 AI 失败后随机时允许选择题降级。主观选择不计为正确率。"),
+        field("文本题策略", "activity", "text_strategy", "choice", choices=ACTIVITY_TEXTS,
+              hint="固定好精确输出一个字，不补字、不调用 AI。"),
+        field("AI 回复水平", "activity", "reply_level", "choice", choices=DISCUSSION_LEVELS[:3],
+              hint="仅影响 AI 文本正文。平台字数限制优先，固定好模式不使用此档位。"),
+        field("生成后自动提交投票／问卷", "activity", "auto_submit", "bool",
+              hint="独立于测验与讨论。整卷校验通过才提交；关闭时仅保存本地草稿。"),
+    ])],
     "discussion": [group("讨论任务", "仅处理所选章节中明确关联的必做讨论；发布、任务完成与成绩分别记录。", [
         field("启用讨论任务处理", "discussion", "enabled", "bool"),
         field("回复水平", "discussion", "reply_level", "choice", choices=DISCUSSION_LEVELS,
