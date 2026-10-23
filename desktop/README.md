@@ -144,6 +144,7 @@ ChaoxingDesktop-0.3.9-installer-SHA256.json
 - 投票／问卷功能进入正式发行，使用方式与协议边界见下文。
 - 题库限速仅保留实际使用的 `request_interval`；删除无读取方的 `desktop_interval` 及其测试断言，回归直接核对传入适配器的请求参数。
 - 删除字体解码器的原始 HTML 缓存；保留服务凭据加密、日志脱敏、QML 动态绑定及平台兼容逻辑。
+- 应用图标更新为书页播放设计：`assets/app.ico` 由 `scripts/make_app_icon.py` 从 `assets/app.svg` 生成，构建流程在 PyInstaller 之前自动刷新，供两个可执行文件与安装程序使用。
 - 同步当前版本和构建 / 下载入口；运行依赖与锁文件保持不变。
 
 ## 0.3.7 音频修复与清理

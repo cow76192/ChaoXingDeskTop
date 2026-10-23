@@ -40,6 +40,8 @@ if ([System.IO.Path]::GetFileName($taskOutput) -ne 'ChaoxingDesktop') {
     throw 'OutputDirectory must end with ChaoxingDesktop'
 }
 $taskDist = [System.IO.Directory]::GetParent($taskOutput).FullName
+& $taskPython scripts/make_app_icon.py
+if ($LASTEXITCODE -ne 0) { throw 'Application icon generation failed' }
 & $taskPython -m PyInstaller --clean --noconfirm --distpath $taskDist ChaoxingDesktop.spec
 if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
 Copy-Item -LiteralPath README.md,LICENSE,THIRD_PARTY_NOTICES.md,requirements-lock.txt -Destination $taskOutput

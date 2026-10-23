@@ -38,8 +38,10 @@ a.binaries, a.datas = trim_bundle(a.binaries, a.datas)
 pyz = PYZ(a.pure)
 gui = EXE(pyz, a.scripts, [], exclude_binaries=True, name='ChaoxingDesktop', debug=False,
           bootloader_ignore_signals=False, strip=False, upx=False, console=False,
+          icon=str(root / 'assets/app.ico'),
           version=version_resource(__version__, 'ChaoxingDesktop'))
 worker = EXE(pyz, a.scripts, [], exclude_binaries=True, name='ChaoxingWorker', debug=False,
              bootloader_ignore_signals=False, strip=False, upx=False, console=True,
+             icon=str(root / 'assets/app.ico'),
              version=version_resource(__version__, 'ChaoxingWorker'))
 coll = COLLECT(gui, worker, a.binaries, a.datas, strip=False, upx=False, name='ChaoxingDesktop')

@@ -73,8 +73,11 @@ def main():
     retired.write_text('\n'.join(f'Delete "$INSTDIR\\{path}"' for path in obsolete)
                        + '\n', encoding='utf-8-sig')
     installer = output / f"ChaoxingDesktop-{__version__}-Setup-win-x64.exe"
+    icon = ROOT / "assets/app.ico"
+    if not icon.is_file():
+        raise FileNotFoundError("assets/app.ico is missing; run scripts/make_app_icon.py first")
     subprocess.run([str(compiler), "/V2", "/INPUTCHARSET", "UTF8", f"/DAPP_VERSION={__version__}",
-                    f"/DAPP_DIR={stage}", f"/DOUTPUT_EXE={installer}",
+                    f"/DAPP_DIR={stage}", f"/DOUTPUT_EXE={installer}", f"/DAPP_ICON={icon}",
                     f"/DUNINSTALL_FILES={uninstall}", f"/DRETIRED_FILES={retired}",
                     str(ROOT / "scripts/installer.nsi")], check=True)
     shutil.copy2(source, output / source.name)

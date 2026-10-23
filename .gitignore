@@ -24,6 +24,7 @@
 /_tmptest/
 /.idea/
 /.vscode/
+/.workbuddy/
 *.tmp
 *.bak
 *.orig

@@ -25,6 +25,8 @@ Var NoRegistration
 Var NoShortcuts
 
 !define MUI_ABORTWARNING
+!define MUI_ICON "${APP_ICON}"
+!define MUI_UNICON "${APP_ICON}"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\ChaoxingDesktop.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "运行超星桌面版"
 !define MUI_FINISHPAGE_RUN_NOTCHECKED
