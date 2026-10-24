@@ -52,7 +52,7 @@ ColumnLayout {
                     Text { text: modelData.title; textFormat: Text.PlainText; Layout.fillWidth: true; elide: Text.ElideRight; color: "#17243a"; font.pixelSize: 13 }
                     Text { text: modelData.stageText + " · 任务" + modelData.taskText; color: modelData.task_status === "confirmed" ? "#15803d" : "#b45309"; font.pixelSize: 12 }
                 }
-                Text { text: modelData.course + " / " + modelData.chapter; textFormat: Text.PlainText; Layout.fillWidth: true; elide: Text.ElideRight; color: "#8490a4"; font.pixelSize: 11 }
+                Text { text: modelData.course + " / " + modelData.chapter; textFormat: Text.PlainText; Layout.fillWidth: true; elide: Text.ElideRight; color: "#627086"; font.pixelSize: 11 }
                 Text { text: modelData.levelText + " · " + modelData.sourceText + " · " + modelData.elapsed_ms + " ms · " + modelData.reason; textFormat: Text.PlainText; Layout.fillWidth: true; elide: Text.ElideRight; color: "#627086"; font.pixelSize: 12 }
             }
         }
@@ -75,6 +75,7 @@ ColumnLayout {
                 }
             }
             ActionButton { text: "复制讨论正文"; enabled: !!pane.selected.content; onClicked: bridge.copyDiscussion(pane.selectedId) }
+            ActionButton { objectName: "editDiscussionCopy"; text: "编辑本地副本…"; enabled: pane.selected.stage === "draft" && !bridge.summary.busy; onClicked: { detail.close(); bridge.openDraftCopy("discussion", pane.selectedId) } }
         }
     }
 }

@@ -52,7 +52,7 @@ ColumnLayout {
                     Text { text: modelData.title; textFormat: Text.PlainText; Layout.fillWidth: true; elide: Text.ElideRight; color: "#17243a"; font.pixelSize: 13 }
                     Text { text: modelData.stageText; color: modelData.submit_status === "confirmed" || modelData.submit_status === "existing" ? "#15803d" : "#b45309"; font.pixelSize: 12 }
                 }
-                Text { text: modelData.course + " / " + modelData.chapter; textFormat: Text.PlainText; Layout.fillWidth: true; elide: Text.ElideRight; color: "#8490a4"; font.pixelSize: 11 }
+                Text { text: modelData.course + " / " + modelData.chapter; textFormat: Text.PlainText; Layout.fillWidth: true; elide: Text.ElideRight; color: "#627086"; font.pixelSize: 11 }
                 Text { text: "已解决 " + modelData.solved + " / " + modelData.questionCount + " 题（必答 " + modelData.requiredCount + "） · " + modelData.sourceText + " · " + modelData.elapsed_ms + " ms"; textFormat: Text.PlainText; Layout.fillWidth: true; elide: Text.ElideRight; color: "#627086"; font.pixelSize: 12 }
                 Text { text: "提交：" + modelData.submitText + " · 任务点：" + modelData.taskText + " · " + modelData.reason; textFormat: Text.PlainText; Layout.fillWidth: true; elide: Text.ElideRight; color: "#627086"; font.pixelSize: 12 }
             }
@@ -77,6 +77,7 @@ ColumnLayout {
                 }
             }
             ActionButton { text: "复制逐题草稿"; enabled: !!pane.selected.detailText; onClicked: bridge.copyActivity(pane.selectedId) }
+            ActionButton { objectName: "editActivityCopy"; text: "编辑本地副本…"; enabled: (pane.selected.stage === "draft" || (pane.selected.stage === "pending" && pane.selected.submit_status === "draft")) && !bridge.summary.busy; onClicked: { detail.close(); bridge.openDraftCopy("activity", pane.selectedId) } }
         }
     }
 }

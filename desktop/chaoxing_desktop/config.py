@@ -69,7 +69,7 @@ def defaults() -> configparser.ConfigParser:
                               likeapi_model="glm-4.5-air", likeapi_retry="true", likeapi_retry_times="3"),
         "ai": dict(enabled="false", provider="AI", endpoint="", key="", model="",
                    vision="false", min_interval_seconds="3.0", http_proxy="",
-                   check_connection="true", timeout="60", retries="2"),
+                   check_connection="true", timeout="60", retries="2", request_limit="0", token_warning="0"),
         "desktop": dict(manual_fallback="false", random_fallback="false"),
         "discussion": dict(enabled="false", reply_level="medium", auto_submit="false"),
         "activity": dict(enabled="false", choice_strategy="ai", text_strategy="ai", reply_level="medium", auto_submit="false"),
@@ -172,9 +172,15 @@ def serialize(config: configparser.ConfigParser, include_secrets: bool = True) -
 
 def is_secret(key: str) -> bool:
     key = key.lower()
-    if key == "use_cookies":
+    if key in ("use_cookies", "token_warning"):
         return False
     return key in SECRET_KEYS or any(s in key for s in ("password", "token", "secret", "authorization", "cookie", "api_key")) or key.endswith("_key")
+
+
+class ConfigValidationError(ValueError):
+    def __init__(self, message, section, key):
+        super().__init__(message)
+        self.section, self.key = section, key
 
 
 def validate(config: configparser.ConfigParser, login: bool = False, services: bool = False,
@@ -190,9 +196,12 @@ def validate(config: configparser.ConfigParser, login: bool = False, services: b
     numeric.append((t, 'cover_rate', 0, 1, float))
     if config['question_bank']['declarative_definition'].strip():
         from .declarative import validate_definition
-        validate_definition(config['question_bank']['declarative_definition'])
+        try:
+            validate_definition(config['question_bank']['declarative_definition'])
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ConfigValidationError(str(exc), 'question_bank', 'declarative_definition') from None
     if 'TikuDeclarative' in config['question_bank']['providers'].split(',') and not config['question_bank']['declarative_definition'].strip():
-        raise ValueError('请先导入声明式 JSON 题库定义')
+        raise ConfigValidationError('请先导入声明式 JSON 题库定义', 'question_bank', 'declarative_definition')
     for section, key, low, high, cast in numeric:
         try:
             value = cast(section[key])
@@ -200,28 +209,28 @@ def validate(config: configparser.ConfigParser, login: bool = False, services: b
                 raise ValueError
         except (ValueError, KeyError):
             title = fields.get((section.name, key), {}).get('title', key)
-            raise ValueError(f"{title}（{key}）必须在 {low}–{high} 范围内。") from None
+            raise ConfigValidationError(f"{title}（{key}）必须在 {low}–{high} 范围内。", section.name, key) from None
     for section, keys in BOOLEAN_KEYS.items():
         for key in keys:
             if config[section][key].lower() not in ("true", "false"):
-                raise ValueError(f"{key} 应填写 true 或 false。")
+                raise ConfigValidationError(f"{key} 应填写 true 或 false。", section, key)
     if config['matching']['bank_review_policy'] not in {value for _, value in BANK_REVIEW_POLICIES}:
-        raise ValueError('题库答案审核策略无效，请选择严格核验、跟随 AI 状态或选项优先。')
+        raise ConfigValidationError('题库答案审核策略无效，请选择严格核验、跟随 AI 状态或选项优先。', 'matching', 'bank_review_policy')
     if config['discussion']['reply_level'] not in {value for _, value in DISCUSSION_LEVELS}:
-        raise ValueError('讨论回复水平无效，请选择精简、中等、详细或固定好。')
+        raise ConfigValidationError('讨论回复水平无效，请选择精简、中等、详细或固定好。', 'discussion', 'reply_level')
     for key, choices in (('choice_strategy', ACTIVITY_CHOICES), ('text_strategy', ACTIVITY_TEXTS),
                          ('reply_level', DISCUSSION_LEVELS[:3])):
         if config['activity'][key] not in {value for _, value in choices}:
-            raise ValueError('投票／问卷配置无效：' + key)
+            raise ConfigValidationError('投票／问卷配置无效：' + key, 'activity', key)
     if c["notopen_action"] not in ("retry", "ask", "continue"):
-        raise ValueError("关闭章节策略应为 retry、ask 或 continue。")
+        raise ConfigValidationError("关闭章节策略应为 retry、ask 或 continue。", 'common', 'notopen_action')
     names = [s.strip() for s in config["question_bank"]["providers"].split(",") if s.strip()]
     if t["provider"] or any(s not in dict((value, title) for title, value in BANKS) for s in names) or len(names) != len(set(names)):
         raise ValueError("题库配置无效，请在题库列表中选择服务。")
     if config["ai"]["provider"] not in ("AI", "SiliconFlow"):
-        raise ValueError("AI 服务类型无效。")
+        raise ConfigValidationError("AI 服务类型无效。", 'ai', 'provider')
     if n["provider"] and n["provider"] not in NOTIFICATIONS:
-        raise ValueError("通知服务名称无效。")
+        raise ConfigValidationError("通知服务名称无效。", 'notification', 'provider')
     if login and c["use_cookies"].lower() != "true" and (not c["username"].strip() or not c["password"].strip()):
         raise ValueError("请填写账号和密码，或选择 Cookie 登录。")
     if login and c["use_cookies"].lower() == "true" and not (cookie_path if cookie_path is not None else data_dir() / "cookies.txt").is_file():
@@ -230,23 +239,24 @@ def validate(config: configparser.ConfigParser, login: bool = False, services: b
         bank, ai = config["question_bank"], config["ai"]
         for name, key in (("TikuYanxi", "yanxi_tokens"), ("TikuLike", "like_tokens")):
             if name in names and not bank[key].strip():
-                raise ValueError(f"{dict((v, k) for k, v in BANKS)[name]}需要填写 Token。")
+                raise ConfigValidationError(f"{dict((v, k) for k, v in BANKS)[name]}需要填写 Token。", 'question_bank', key)
         if ai["enabled"].lower() == "true" and not all(ai[k].strip() for k in ("endpoint", "key", "model")):
-            raise ValueError("启用 AI 时需要填写服务地址、API Key 和模型。")
+            key = next(k for k in ('endpoint', 'key', 'model') if not ai[k].strip())
+            raise ConfigValidationError("启用 AI 时需要填写服务地址、API Key 和模型。", 'ai', key)
         if "TikuAdapter" in names and not bank["adapter_url"].strip():
-            raise ValueError("Adapter 题库需要填写 URL。")
+            raise ConfigValidationError("Adapter 题库需要填写 URL。", 'question_bank', 'adapter_url')
         from urllib.parse import urlparse
         for provider, prefix in (("TikuYanxi", "yanxi"), ("TikuGo", "go"), ("TikuLike", "like")):
             address = bank[prefix + "_endpoint"].strip()
             if provider in names and (urlparse(address).scheme not in ("http", "https") or not urlparse(address).netloc):
-                raise ValueError(f"{dict((v, k) for k, v in BANKS)[provider]}地址应为完整的 HTTP 或 HTTPS 地址。")
-        for title, address in [("AI 服务地址", ai["endpoint"] if ai["enabled"].lower() == "true" else ""),
-                               ("Adapter 地址", bank["adapter_url"] if "TikuAdapter" in names else ""),
-                               ("通知地址", n["url"] if n["provider"] else ""), ("AI 代理", ai["http_proxy"])]:
+                raise ConfigValidationError(f"{dict((v, k) for k, v in BANKS)[provider]}地址应为完整的 HTTP 或 HTTPS 地址。", 'question_bank', prefix + '_endpoint')
+        for title, address, section, key in [("AI 服务地址", ai["endpoint"] if ai["enabled"].lower() == "true" else "", 'ai', 'endpoint'),
+                               ("Adapter 地址", bank["adapter_url"] if "TikuAdapter" in names else "", 'question_bank', 'adapter_url'),
+                               ("通知地址", n["url"] if n["provider"] else "", 'notification', 'url'), ("AI 代理", ai["http_proxy"], 'ai', 'http_proxy')]:
             if address and (urlparse(address).scheme not in ("http", "https") or not urlparse(address).netloc):
-                raise ValueError(f"{title}应为完整的 HTTP 或 HTTPS 地址。")
+                raise ConfigValidationError(f"{title}应为完整的 HTTP 或 HTTPS 地址。", section, key)
         if n["provider"] and not n["url"].strip():
-            raise ValueError("启用通知时需要填写通知 URL。")
+            raise ConfigValidationError("启用通知时需要填写通知 URL。", 'notification', 'url')
 
 
 def to_payload(config: configparser.ConfigParser) -> dict:

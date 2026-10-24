@@ -25,12 +25,16 @@ if ($LASTEXITCODE -ne 0) { throw 'Build environment differs from requirements-lo
 if ($LASTEXITCODE -ne 0) { throw 'Dependency check failed' }
 & $taskPython -m unittest discover -s tests -p 'test_*.py'
 if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
-foreach ($taskUiTest in @('qml_ui_smoke.py', 'accounts_ui_smoke.py', 'audit_ui_smoke.py', 'activity_ui_smoke.py')) {
+foreach ($taskUiTest in @('qml_ui_smoke.py', 'ocs_ui_smoke.py', 'accounts_ui_smoke.py', 'audit_ui_smoke.py', 'activity_ui_smoke.py')) {
     & $taskPython (Join-Path 'tests' $taskUiTest)
     if ($LASTEXITCODE -ne 0) { throw "Source UI acceptance failed: $taskUiTest" }
 }
 & $taskPython tests/services_media_smoke.py build/services-media-smoke
 if ($LASTEXITCODE -ne 0) { throw 'Service scrolling and media UI acceptance failed' }
+& $taskPython tests/matching_ui_smoke.py build/matching-ui-smoke
+if ($LASTEXITCODE -ne 0) { throw 'Answer matching UI acceptance failed' }
+& $taskPython tests/workbench_ui_smoke.py build/workbench-ui-smoke
+if ($LASTEXITCODE -ne 0) { throw 'Workbench source UI acceptance failed' }
 $taskOutput = [System.IO.Path]::GetFullPath((Join-Path $taskRoot $OutputDirectory))
 $taskDistRoot = [System.IO.Path]::GetFullPath((Join-Path $taskRoot 'dist')) + [System.IO.Path]::DirectorySeparatorChar
 if (-not $taskOutput.StartsWith($taskDistRoot, [System.StringComparison]::OrdinalIgnoreCase)) {

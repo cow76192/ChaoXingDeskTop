@@ -2,17 +2,17 @@
 
 面向 Windows 的超星课程学习工作台，用一个桌面窗口管理账号、课程、章节任务、题库与 AI 服务，以及逐题结果和日志。
 
-**当前版本：0.3.9** · **Windows 10 / 11 x64** · **Python + PySide6 / QML** · **GPL-3.0**
+**当前版本：0.4.0** · **Windows 10 / 11 x64** · **Python + PySide6 / QML** · **GPL-3.0**
 
-[下载安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.9/ChaoxingDesktop-0.3.9-Setup-win-x64.exe) · [发行说明](https://github.com/mikubob/ChaoXingDeskTop/releases/tag/v0.3.9) · [使用与构建指南](desktop/README.md) · [第三方声明](desktop/THIRD_PARTY_NOTICES.md)
+[下载安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.4.0/ChaoxingDesktop-0.4.0-Setup-win-x64.exe) · [发行说明](https://github.com/mikubob/ChaoXingDeskTop/releases/tag/v0.4.0) · [使用与构建指南](desktop/README.md) · [第三方声明](desktop/THIRD_PARTY_NOTICES.md)
 
 ## 下载与安装
 
 | 文件 | 用途 |
 | --- | --- |
-| [Windows x64 安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.9/ChaoxingDesktop-0.3.9-Setup-win-x64.exe) | 日常使用，已包含 Python 运行环境 |
-| [对应版本源码](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.9/ChaoxingDesktop-0.3.9-source.zip) | 查看实现、自行运行或构建 |
-| [SHA256 校验清单](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.3.9/ChaoxingDesktop-0.3.9-installer-SHA256.json) | 核对安装包及源码 ZIP 的完整性 |
+| [Windows x64 安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.4.0/ChaoxingDesktop-0.4.0-Setup-win-x64.exe) | 日常使用，已包含 Python 运行环境 |
+| [对应版本源码](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.4.0/ChaoxingDesktop-0.4.0-source.zip) | 查看实现、自行运行或构建 |
+| [SHA256 校验清单](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.4.0/ChaoxingDesktop-0.4.0-installer-SHA256.json) | 核对安装包及源码 ZIP 的完整性 |
 
 下载并运行安装包，按提示完成安装后，从桌面或开始菜单打开「超星桌面版」。首次使用可以直接选择「离线演示」，体验界面和任务流程。
 
@@ -47,6 +47,19 @@
 **0.3.8 新增讨论任务功能**：在「题库与 AI → 讨论任务」启用处理，选择精简、中等、详细或固定单字“好”；按需独立开启讨论自动提交。关闭提交时仅保存草稿，在「任务与日志 → 讨论记录」查看和复制。前三档复用 AI 服务；固定好不调用模型。新配置默认关闭讨论处理和提交。
 
 支持经章节 `insertbbs` 明确关联的新版超星讨论；非任务点、未知页面和无法核实本人回复时不自动发布。发布结果未知时保留记录，只读核验，不盲目重发。发布、任务点完成和成绩是三个不同结果。[讨论协议与边界](desktop/vendor/chaoxing/api/DISCUSSION_PROTOCOL.md)
+
+## 0.4.0 更新
+
+- 新增「需处理」中心，按原因和关键词汇总未完成事项；可只读核验章节及本人讨论／活动证据，核验不会重发未知提交。
+- 启动前可查看本轮策略、隐藏的已选课程和三类提交开关；自动提交首次使用或策略改变时确认。
+- 题库列表与详情更紧凑，AI 设置可直达；支持加密命名 AI 档案、连接检查过期提示和导入模板预览。
+- 新增按账号保存的运行摘要，可重启回看、重新读课后恢复课程选择；AI 提供整轮请求硬上限及实际 token 告警。
+- 讨论／问卷可编辑独立的本地人工副本，保存、复制和导出；没有副本独立提交入口，未知提交与停止后的旧来源保持只读。
+- 新增默认排障配置导出、数据与容量说明、手动版本入口；优化窄窗、必要灰字对比度和人工补全焦点。
+- 修复核验新证据不再完成时仍沿用旧成功显示的问题；修复配置错误定位不足、从属参数易误读及日志展开不一致。
+- 删除副本编辑器无调用的旧答案查找函数，补齐构建与 CI 中的题目结果和答案匹配界面验收；依赖锁定版本保持不变。
+
+运行摘要与人工副本含课程名、原题或正文，未加密；升级前完整备份数据目录。AI 档案受本机 Windows 用户 DPAPI 保护。当前未代码签名；软件缩放验收不能代替 Windows DPI／文字放大与跨屏实测。
 
 ## 0.3.9 更新
 

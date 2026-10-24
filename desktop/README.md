@@ -1,8 +1,8 @@
 # 桌面版使用与开发指南
 
-**版本：0.3.9** · Windows 10 / 11 x64 · Python + PySide6 / QML · GPL-3.0
+**版本：0.4.0** · Windows 10 / 11 x64 · Python + PySide6 / QML · GPL-3.0
 
-[项目首页](../README.md) · [下载安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/tag/v0.3.9) · [第三方声明](THIRD_PARTY_NOTICES.md)
+[项目首页](../README.md) · [下载安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/tag/v0.4.0) · [第三方声明](THIRD_PARTY_NOTICES.md)
 
 本文中的命令默认在 `desktop` 目录的 PowerShell 中执行。
 
@@ -65,6 +65,26 @@
 - 日志先脱敏再显示与写盘，单文件约 10 MiB、总量约 100 MiB、保留 14 天。删除仅处理本应用命名的普通日志。
 - 同一数据目录仅运行一个主窗口，重复启动会唤起已有窗口。界面日志、逐题结果及后台队列有容量限制。
 
+## 0.4.0 工作台升级
+
+- 课程底栏的「查看本轮策略」集中显示三类提交开关、隐藏的已选课程、题库顺序、AI／人工／随机与通知类型。首次使用或修改自动提交策略后确认一次；普通只保存不增加确认。确认期间账号、会话、课程或配置变化会使确认失效。
+- 服务页默认显示紧凑题库列表，展开所选详情；「AI 设置」可直接进入 AI 表单。编辑、启用与排序保留输入控件。真实连接检查需主动触发，可能消耗额度；配置变化使上次检查过期。
+- 「任务与日志 → 需处理」汇总章节、题目、讨论和活动的原因，可按类别与关键词筛选、键盘打开全文。聚合显示最多 2000 项／8 MiB，淘汰显示不会清除防重记录。日志默认收起，可随时展开。
+- 「只读核验章节」仅使用当前已读取课程的 Cookie 会话，重新读取章节完成状态。「核验本人讨论／活动」另读任务卡与本人参与证据，分别展示本人状态、任务点和章节状态。两个入口均不生成、保存答案、提交、发布或调用活动完成回调，也不清除 unknown／intent；未找到记录不能解除重发限制。会话过期时先重新读课，不回退到密码登录。
+- 「高级设置 → 导出排障配置」只导出已知布尔、枚举、数值策略和版本。地址、凭据、账号、正文和未知扩展字段全部省略；完整 INI 仍为明确标注含凭据的个人备份选项。数据说明可查看 profile、DPAPI 和备份边界。
+- 「运行摘要」按账号隔离，最多 20 轮／2 MiB，每轮最多 1000 个未完成章节标题及定位；最多每 2 秒写入一次原子快照。摘要包含课程名和课程／章节标识，未加密，不保存题干或答案。「从摘要选课」先重新核实身份并读课，再选择能定位的未完成课程；不自动启动，不重放旧请求。旧摘要没有定位时仍可回看，需手动选课。
+- AI 设置新增「每次操作 AI 请求硬上限」，0 为不限。一次课程运行内，连接预检、测验、讨论和活动共享上限，重试也计数；主动连接检查和预览分别为独立操作。可设服务返回 token 的累计告警（0 关闭），只告警、不阻断；缺失 usage 显示未知，不估造 token 或账单。
+- 「命名 AI 档案」可把当前设置保存为默认档案，再显式切换不同地址、模型、视觉声明、请求限制与独立凭据。每个档案整份配置使用 Windows 用户 DPAPI 加密；最多 20 项／256 KiB。运行中锁定，没有自动备用提供商。删除档案保留当前已加载设置副本；完整 INI 不含这些档案，备份需保留 `ai_profiles.json`。
+- 声明式题库导入先展示域名、方法、请求／响应映射和拒绝字段，校验通过后再确认替换。校验失败不能导入，不执行脚本，也不触发连接检查。
+- 讨论和问卷详情可打开「编辑本地副本」；显式标记人工来源，支持按原生题目／选项 ID 修改与约束提示、版本保存、复制和导出。仅编辑已确认的本地草稿，问卷未答完整但明确保存为草稿时也可修正。原始记录、生产意图和平台状态不变。停止／异常退出后的旧显示来源、unknown／intent 和已提交记录保持只读。重启后的副本可回看导出，来源重新确认前只读。
+- 人工副本在 `draft_copies/` 按账号保存，最多 20 项／2 MiB，含题目和正文、未加密。满容量不自动淘汰；可先导出，再经确认删除独立副本，删除不影响原始草稿或防重记录。当前没有副本提交入口，第二期前置合同见 [REVIEWED_SUBMISSION_CONTRACT.md](REVIEWED_SUBMISSION_CONTRACT.md)。
+- 「任务与日志 → 容量」查看各显示保留／淘汰、日志积压／峰值／失败批次和导出范围。左下「版本与校验」查看运行方式和 profile、主动打开发行网页或复制不含账号／路径的版本校验说明；不自动下载、执行或宣称版本最新，也不代替实际安装包哈希核对。
+- 关闭重做／追加次数时从属参数禁用且保留；保存数值、枚举或模板错误时跳转并聚焦对应文本、多行、开关或选择控件。必要灰色文字提高对比度。最小逻辑窗口仍为 980×700，高 DPI 实机与跨屏验收仍待进行。
+
+实施验收与已知限制见 [UPGRADE_ACCEPTANCE.md](UPGRADE_ACCEPTANCE.md)。
+
+0.4.0 清理后已通过 413 项单元、7 组界面回归、四档软件缩放、冻结 worker／GUI，以及隔离目录中的全新安装、0.3.9 覆盖升级和卸载数据保留验收。安装测试禁用注册与快捷方式；并非干净虚拟机或 Windows 高 DPI 实机验收。源码与安装包由现有 provenance 门槛绑定。
+
 ## 源码运行
 
 开发与构建环境为 **Windows x64、Python 3.13.9**。准备运行环境：
@@ -93,10 +113,13 @@ python -m venv .venv-build
 ```powershell
 .venv-build/Scripts/python.exe -m unittest discover -s tests -p 'test_*.py'
 .venv-build/Scripts/python.exe tests/qml_ui_smoke.py
+.venv-build/Scripts/python.exe tests/ocs_ui_smoke.py
+.venv-build/Scripts/python.exe tests/matching_ui_smoke.py build/matching-ui-smoke
 .venv-build/Scripts/python.exe tests/accounts_ui_smoke.py
 .venv-build/Scripts/python.exe tests/audit_ui_smoke.py
 .venv-build/Scripts/python.exe tests/activity_ui_smoke.py
 .venv-build/Scripts/python.exe tests/services_media_smoke.py build/services-media-smoke
+.venv-build/Scripts/python.exe tests/workbench_ui_smoke.py build/workbench-ui-smoke
 ```
 
 运行离线负载测试：
@@ -112,32 +135,32 @@ python -m venv .venv-build
 ### 构建程序
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -OutputDirectory dist/release-0.3.9/ChaoxingDesktop
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -OutputDirectory dist/release-0.4.0/ChaoxingDesktop
 ```
 
 构建脚本会准备 `.venv-build`、安装锁定依赖并核对依赖闭包，随后运行单元与源码界面回归、执行 PyInstaller，最后验收冻结 worker 与 QML 界面。
 
-程序输出至 `dist/release-0.3.9/ChaoxingDesktop/`。可通过 `-Wheelhouse <绝对路径>` 使用完整的本地 wheel 目录离线安装。依赖更新需要重新生成、审阅锁文件，并在干净环境中验证。
+程序输出至 `dist/release-0.4.0/ChaoxingDesktop/`。可通过 `-Wheelhouse <绝对路径>` 使用完整的本地 wheel 目录离线安装。依赖更新需要重新生成、审阅锁文件，并在干净环境中验证。
 
 ### 生成安装包
 
 准备 [NSIS 编译器](https://nsis.sourceforge.io/Download)，将下方路径替换为本机的 `makensis.exe`：
 
 ```powershell
-.venv-build/Scripts/python.exe scripts/build_installer.py --app dist/release-0.3.9/ChaoxingDesktop --compiler "C:/Tools/NSIS/makensis.exe"
+.venv-build/Scripts/python.exe scripts/build_installer.py --app dist/release-0.4.0/ChaoxingDesktop --compiler "C:/Tools/NSIS/makensis.exe"
 ```
 
 产物默认写入项目根目录的 `release/`：
 
 ```text
-ChaoxingDesktop-0.3.9-Setup-win-x64.exe
-ChaoxingDesktop-0.3.9-source.zip
-ChaoxingDesktop-0.3.9-installer-SHA256.json
+ChaoxingDesktop-0.4.0-Setup-win-x64.exe
+ChaoxingDesktop-0.4.0-source.zip
+ChaoxingDesktop-0.4.0-installer-SHA256.json
 ```
 
 安装包包含完整程序、对应源码 ZIP、许可和第三方声明，NSIS 编译器不随包分发。生成安装包前会核对程序版本、源码与产物哈希，以及单元、worker、GUI 验收标记；跳过 GUI 的构建不能用于正式发布。修改构建输入后，需要重新构建和验收。
 
-安装器与便携打包共用 `scripts/source_bundle.py` 的公共文件清单，不收集历史计划、截图、验收文档、用户数据或临时文件。升级时只删除 `scripts/retired-runtime-0.3.5.txt` 列出的具体废弃运行文件，不使用通配符或递归删除，也不删除新程序仍包含的文件。
+安装器与便携打包共用 `scripts/source_bundle.py` 的公共文件清单，仅额外收录工作台验收记录和副本提交边界合同，不收集历史计划、截图、用户数据或临时文件。升级时只删除 `scripts/retired-runtime-0.3.5.txt` 列出的具体废弃运行文件，不使用通配符或递归删除，也不删除新程序仍包含的文件。
 
 ## 0.3.9 更新与清理
 

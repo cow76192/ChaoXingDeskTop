@@ -44,6 +44,8 @@ with tempfile.TemporaryDirectory() as directory:
     assert b.config["common"]["username"] == "123456"
     window.setProperty("pageIndex", 2)
     QTest.qWait(100)
+    find('settings_TikuYanxi').clicked.emit()
+    QTest.qWait(50)
     token = find("field_question_bank_yanxi_tokens")
     token.forceActiveFocus()
     for char in "abc123":

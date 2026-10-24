@@ -5,7 +5,7 @@ import QtQuick.Layouts
 
 ColumnLayout {
     id: page
-    property bool logsOpen: true
+    property bool logsOpen: false
     property bool followLogs: true
     function mediaTime(seconds) {
         let value = Math.max(0, Math.floor(seconds || 0))
@@ -38,6 +38,8 @@ ColumnLayout {
         Text { text: bridge.summary.progress + "%"; font.bold: true; color: "#2563eb" }
     }
     Text { text: "按章节统计，同一章节可含多个任务点；处理进度 100% 表示本轮结束，待完成 / 未核验章节请在平台确认。"; Layout.fillWidth: true; wrapMode: Text.Wrap; color: "#627086"; font.pixelSize: 12 }
+    Text { text: "本次操作 AI 请求 " + bridge.aiUsage.requests + " / " + (bridge.aiUsage.limit || "不限") + " · 服务返回 token " + bridge.aiUsage.tokens + "（" + bridge.aiUsage.known + " 次有 usage，" + bridge.aiUsage.unknown + " 次用量未知）· 不等于账单或正确率"; color: "#627086"; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true }
+    Text { visible: !!bridge.aiWarning; text: bridge.aiWarning; color: "#995a0d"; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true }
     SplitView {
         Layout.fillWidth: true; Layout.fillHeight: true; orientation: Qt.Vertical
         Rectangle {
@@ -48,13 +50,21 @@ ColumnLayout {
                     Layout.fillWidth: true
                     TabBar {
                         id: resultTabs; objectName: "resultTabs"; Layout.fillWidth: true
-                        onCurrentIndexChanged: if (currentIndex === 2) page.logsOpen = false
                         TabButton { text: "章节任务" }
                         TabButton { text: "逐题结果（" + bridge.summary.questionCount + "）" }
                         TabButton { text: "讨论记录（" + bridge.summary.discussionCount + "）" }
                         TabButton { text: "投票／问卷（" + bridge.summary.activityCount + "）" }
+                        TabButton { objectName: "attentionTab"; text: "需处理" }
                     }
                     Text { text: bridge.summary.busy ? "运行中" : "当前任务"; font.pixelSize: 12; color: "#627086" }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    ActionButton { objectName: "history_button"; text: "运行摘要"; onClicked: { bridge.loadRunHistory(); history.open() } }
+                    ActionButton { objectName: "recovery_button"; text: "从摘要选课…"; enabled: !bridge.summary.busy; onClicked: { bridge.loadRunHistory(); recovery.open() } }
+                    ActionButton { objectName: "saved_drafts_button"; text: "本地副本…"; enabled: !bridge.summary.busy; onClicked: { savedDrafts.rows = bridge.listDraftCopies(); savedDrafts.open() } }
+                    ActionButton { objectName: "capacity_button"; text: "容量…"; onClicked: capacity.open() }
+                    Text { visible: !!bridge.historyError; text: bridge.historyError; color: "#b42323"; wrapMode: Text.Wrap; font.pixelSize: 12; Layout.fillWidth: true }
                 }
                 ListView {
                     visible: resultTabs.currentIndex === 0
@@ -99,6 +109,7 @@ ColumnLayout {
                 QuestionResults { id: questions; visible: resultTabs.currentIndex === 1; Layout.fillWidth: true; Layout.fillHeight: true }
                 DiscussionResults { visible: resultTabs.currentIndex === 2; Layout.fillWidth: true; Layout.fillHeight: true }
                 ActivityResults { visible: resultTabs.currentIndex === 3; Layout.fillWidth: true; Layout.fillHeight: true }
+                AttentionResults { visible: resultTabs.currentIndex === 4; Layout.fillWidth: true; Layout.fillHeight: true }
             }
         }
         Rectangle {
@@ -149,6 +160,67 @@ ColumnLayout {
                     }
                 }
             }
+        }
+    }
+    ReadOnlyDialog {
+        id: capacity; objectName: "capacityDialog"
+        title: "显示与写盘容量"; width: Math.min(720, page.width); height: Math.min(580, parent.height - 50)
+        bodyText: bridge.capacityInfo
+    }
+    Basic.Dialog {
+        id: savedDrafts; objectName: "savedDraftsDialog"; property var rows: []
+        parent: Overlay.overlay; anchors.centerIn: parent; modal: true
+        title: "按账号保存的人工副本"; width: Math.min(600, page.width); height: 280
+        padding: 18
+        background: Rectangle { color: "white"; radius: 12; border.color: "#cdd7e6" }
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        contentItem: ColumnLayout {
+            Label { text: "最多 20 项 / 2 MiB，容量满不自动丢弃人工编辑。来源未在当前轮确认时只读，可复制或导出。这里不会改变提交去重记录。"; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            ChoiceBox { id: savedDraft; Layout.fillWidth: true; model: savedDrafts.rows; textRole: "title"; valueRole: "id"; Accessible.name: "选择人工副本" }
+            ActionButton { objectName: "deleteSavedDraft"; text: "删除所选人工副本…"; enabled: savedDraft.currentIndex >= 0 && !bridge.summary.busy; onClicked: { deleteDraft.copyId = savedDraft.currentValue; deleteDraft.copyVersion = savedDrafts.rows[savedDraft.currentIndex].version; deleteDraft.open() } }
+            Label { visible: !savedDrafts.rows.length; text: "当前账号没有保存的编辑副本。"; color: "#627086" }
+        }
+        onAccepted: bridge.openSavedDraft(savedDraft.currentValue || "")
+    }
+    Basic.Dialog {
+        id: deleteDraft; objectName: "deleteDraftDialog"; property string copyId: ""; property int copyVersion: 0
+        parent: Overlay.overlay; anchors.centerIn: parent; modal: true
+        title: "删除人工编辑副本？"; width: Math.min(550, page.width); height: 240; padding: 18
+        background: Rectangle { color: "white"; radius: 12; border.color: "#cdd7e6" }
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        contentItem: Label { text: "仅删除所选的人工编辑副本，无法撤销。请先复制或导出需要保留的正文。原始草稿、发布／提交意图与平台状态全部保留。"; wrapMode: Text.Wrap }
+        onAccepted: { bridge.deleteSavedDraft(copyId, copyVersion); savedDrafts.rows = bridge.listDraftCopies() }
+    }
+    Basic.Dialog {
+        id: recovery; objectName: "recoveryDialog"; parent: Overlay.overlay; anchors.centerIn: parent; modal: true
+        title: "重新读课后选择未完成课程"; width: Math.min(620, page.width); height: 340
+        padding: 18
+        background: Rectangle { color: "white"; radius: 12; border.color: "#cdd7e6" }
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        contentItem: ColumnLayout {
+            Label { text: "先连接原账号，再重新读取身份与课程。仅选择摘要中可定位的未完成课程；不会启动任务或重放旧写请求。请检查策略后手动开始新轮。"; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            ChoiceBox { id: recoveryRun; objectName: "recoveryRun"; Layout.fillWidth: true; model: bridge.runHistory; textRole: "time"; valueRole: "id"; Accessible.name: "选择运行摘要" }
+            Label { text: bridge.historyError || (!bridge.runHistory.length ? "当前账号暂无摘要" : "仅保存前 1000 个未完成章节定位。旧摘要可能不含定位，届时需手动选课。"); wrapMode: Text.Wrap; color: "#627086"; Layout.fillWidth: true }
+        }
+        onAccepted: bridge.prepareRecovery(recoveryRun.currentValue || "")
+    }
+    ReadOnlyDialog {
+        id: history; objectName: "historyDialog"; parent: Overlay.overlay; anchors.centerIn: parent; modal: true
+        title: "当前账号的运行摘要（只读）"; width: Math.min(720, page.width); height: Math.min(560, parent.height - 50)
+        standardButtons: Dialog.Close
+        bodyText: {
+            let lines = ["摘要不是平台提交证据。再次处理需重新读取课程；不会重放旧请求。"]
+            let names = {waiting: "等待", running: "处理中", processed: "待核验", success: "已核验", pending: "待完成", failed: "失败", skipped: "跳过", stopped: "停止"}
+            for (let run of bridge.runHistory) {
+                let counts = Object.keys(run.counts).map(function(key) { return (names[key] || "其他状态") + " " + run.counts[key] }).join(" · ")
+                lines.push("\n" + run.time + " · " + run.state + "\n章节状态：" + counts)
+                if (run.courses && run.courses.length) lines.push("所选课程：" + run.courses.map(function(course) { return course.title }).join("；"))
+                if (run.ai) lines.push("AI 请求 " + run.ai.requests + " · 服务返回 token " + run.ai.tokens + " · 用量未知 " + run.ai.unknown + " 次")
+                for (let task of run.tasks) lines.push(task.course + " / " + task.title + " · " + (names[task.status] || "其他状态"))
+                if (run.total > 1000) lines.push("章节较多：仅保留前 1000 个未完成章节标题，计数覆盖本轮。")
+            }
+            if (!bridge.runHistory.length) lines.push(bridge.historyError || "暂无摘要；新运行将在此保留有限快照。")
+            return lines.join("\n")
         }
     }
     Dialog {

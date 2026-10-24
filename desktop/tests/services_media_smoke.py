@@ -44,6 +44,8 @@ def main():
         QTest.qWait(150)
         services = find('servicesScroll')
         scroll = services.property('contentItem')
+        find('settings_TikuGo').clicked.emit()
+        QTest.qWait(80)
         def wheel(item, angle=0, pixels=0):
             point = item.mapToScene(QPointF(item.width() / 2, item.height() / 2))
             event = QWheelEvent(point, QPointF(window.mapToGlobal(point.toPoint())),

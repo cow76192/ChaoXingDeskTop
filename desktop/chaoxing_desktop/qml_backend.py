@@ -18,10 +18,16 @@ from .log_store import LogStore, AsyncLogStore
 from .question_model import QuestionModel, QuestionFilter
 from .discussion_model import DiscussionModel, DiscussionFilter, safe_record as safe_discussion
 from .activity_model import ActivityModel, ActivityFilter, safe_record as safe_activity, detail_text
+from .attention_model import AttentionModel, AttentionFilter, chapter_issue, record_issue
 from .query_result import safe_record
 from .providers import PROVIDER_SPECS
 from .accounts import AccountStore, parse_cookie, write_cookie
-from .storage import revision, write_if_unchanged
+from .storage import revision, write_if_unchanged, atomic_write
+from .diagnostic_export import diagnostic_config
+from .run_history import RunHistory
+from .draft_copies import DraftCopies, make_copy, fingerprint, editable_source, constraints, export_text
+from .release_info import RELEASE_URLS, verification_info
+from .ai_profiles import AIProfiles
 
 
 class Backend(QObject):
@@ -32,6 +38,11 @@ class Backend(QObject):
     coursesChanged = Signal()
     pageRequested = Signal(int)
     questionsReset = Signal()
+    startConfirmationRequested = Signal(str)
+    fieldRequested = Signal(str, str)
+    definitionPreviewRequested = Signal(str, bool)
+    draftOpened = Signal('QVariantMap')
+    draftChanged = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -84,6 +95,30 @@ class Backend(QObject):
         self.search = ""
         self.demo_mode = False
         self.course_identity = None
+        self._start_confirmation = None
+        self._approved_policy = None
+        self.service_checks = {}
+        self.check_target = ''
+        self._definition_import = None
+        self.ai_usage = dict(requests=0, limit=0, known=0, unknown=0, tokens=0)
+        self._ai_token_warning = 0
+        self.history_rows = []
+        self.history_error = ''
+        self._history_account = ''
+        self._history_run = ''
+        self._history_time = ''
+        self._recovery = None
+        self._draft = None
+        self._draft_account = ''
+        self._draft_feedback = ''
+        self._draft_saved = False
+        self._draft_input_errors = {}
+        self._draft_sources_uncertain = False
+        self._run_completed = False
+        self._history_timer = QTimer(self)
+        self._history_timer.setSingleShot(True)
+        self._history_timer.setInterval(2000)
+        self._history_timer.timeout.connect(lambda: self.save_run_summary('运行中 / 若已退出则为中断快照'))
         self._task_model = TaskModel(self)
         self._log_model = LogModel(self)
         self._log_filter = LogFilter(self._log_model, self)
@@ -95,6 +130,8 @@ class Backend(QObject):
         self.discussion_preview = dict(content='', level='', reason='输入示例主题，预览不会发布到课程。')
         self._activity_model = ActivityModel(self)
         self._activity_filter = ActivityFilter(self._activity_model, self)
+        self._attention_model = AttentionModel(self)
+        self._attention_filter = AttentionFilter(self._attention_model, self)
         self.activity_preview = dict(content='', reason='选择策略后预览混合问卷；不会读取课程或提交。')
         self.bank_status = "尚未检查"
         self.log_store = AsyncLogStore(self)
@@ -135,6 +172,22 @@ class Backend(QObject):
     @Property(str, constant=True)
     def version(self):
         return __version__
+
+    @Property(str, constant=True)
+    def releaseInfo(self):
+        return verification_info() + '\n\n当前数据 profile：' + str(data_dir()) + '\n\n检查版本将主动打开固定的官方发行网页；不会自动下载或执行。升级前退出程序并备份 settings、accounts、Cookie、discussions、activities、run_summaries、draft_copies 和 ai_profiles.json。DPAPI 绑定原 Windows 用户与本机。回退旧程序前应核对数据格式，保留完整备份。'
+
+    @Slot(str)
+    def releaseAction(self, action):
+        if action == 'copy':
+            from PySide6.QtGui import QGuiApplication
+            QGuiApplication.clipboard().setText(verification_info())
+            self.notify('版本与校验说明已复制；不含账号、凭据或数据目录。')
+        elif action in RELEASE_URLS:
+            from PySide6.QtGui import QDesktopServices
+            from PySide6.QtCore import QUrl
+            if not QDesktopServices.openUrl(QUrl(RELEASE_URLS[action])):
+                self.notify('未能打开系统浏览器，请稍后重试。', 'warning')
 
     @Property("QVariantMap", constant=True)
     def schema(self):
@@ -208,6 +261,7 @@ class Backend(QObject):
                     stopping=self.controller.stopping and self.controller.active,
                     paused=self.controller.paused, bankStatus=self.bank_status,
                     questionCount=len(self._question_model.rows), questionEvicted=self._question_model.evicted,
+                    attentionEvicted=self._attention_model.evicted,
                     questionRevision=self._question_revision,
                     questionStats=dict(self._question_model.stats),
                     discussionCount=len(self._discussion_model.rows), discussionEvicted=self._discussion_model.evicted,
@@ -233,6 +287,297 @@ class Backend(QObject):
                     logDirectory=str(LogStore.resolve(self.config['logging']['directory'])),
                     logSaveError=self.log_save_error)
 
+    @Property('QVariantMap', notify=changed)
+    def aiUsage(self):
+        return dict(self.ai_usage)
+
+    @Slot(result='QVariantList')
+    def listAiProfiles(self):
+        try:
+            return [dict(id=r['id'], name=r['name']) for r in AIProfiles(data_dir()).read()[0]]
+        except Exception as exc:
+            self.notify(exc, 'danger')
+            return []
+
+    @Slot(str, str)
+    def aiProfileAction(self, action, value):
+        def run():
+            if self.controller.active:
+                raise ValueError('运行中锁定 AI 档案。')
+            store = AIProfiles(data_dir())
+            if action == 'save':
+                store.save(value, self.config)
+                self.notify('当前 AI 设置已保存为命名档案，配置与凭据均使用 DPAPI 加密。', 'success')
+            elif action == 'load':
+                values = store.load(value)
+                candidate = parse_text(serialize(self.config)); candidate['ai'].update(values); validate(candidate)
+                self.config = candidate
+                self.save_state = '有修改 · 未保存'
+                self.ai_status = '已切换档案 · 请主动测试；视觉仅为用户声明'
+                self.configChanged.emit()
+                self.notify('已显式切换 AI 档案；没有联网。请检查目标、模型与视觉声明。', 'success')
+            elif action == 'delete':
+                store.delete(value)
+                self.notify('档案已删除；当前已加载设置副本保持，可重新命名保存。')
+        self.execute(run)
+
+    @Property(str, notify=changed)
+    def capacityInfo(self):
+        metrics = self.log_store.metrics()
+        lines = ['容量只约束显示／摘要；不会删除任何未决提交意图。',
+                 f'日志显示：保留 {len(self._log_model.rows)}，待显示 {len(self._log_model.pending)}，已淘汰 {self._log_model.evicted}；上限 2500 行 / 512 Ki 字符。',
+                 f'日志写盘：积压 {metrics["pending_bytes"]} 字节，峰值 {metrics["peak_bytes"]} / 2097152 字节；失败批次 {metrics["failed_batches"]}，队列拒绝行数 {metrics["dropped_lines"]}。',
+                 '导出日志只含当前有界显示快照，包括待显示的最新批次；不是完整磁盘历史。',
+                 '磁盘日志：每文件约 10 MiB，总计约 100 MiB，保留 14 天。']
+        for name, model in [('逐题', self._question_model), ('讨论', self._discussion_model), ('活动', self._activity_model), ('待处理', self._attention_model)]:
+            lines.append(f'{name}显示：保留 {len(model.rows)}，已淘汰 {model.evicted}；上限 2000 项 / 8 Mi 文本容量。')
+        lines.extend(['运行摘要：按账号最多 20 轮 / 2 MiB，单轮前 1000 个未完成章节定位。',
+                      '命名 AI 档案：最多 20 项 / 256 KiB，单份解密前配置最多 16 KiB；满容量阻止新保存。',
+                      '人工副本：按账号最多 20 项 / 2 MiB；容量满时阻止新保存，不自动删除人工编辑。',
+                      '活动意图存储容量满、记录损坏或磁盘失败会阻止新提交；不能通过清理显示解除去重。'])
+        return '\n\n'.join(lines)
+
+    @Slot(str, result='QVariantMap')
+    def draftAnswer(self, question_id):
+        return next((dict(a) for a in self._draft['answers'] if a['question_id'] == question_id), {}) if self._draft else {}
+
+    def draft_account(self):
+        return 'offline-demo' if self.demo_mode else self.account_store.active if self.account_store else ''
+
+    def draft_source(self, kind, record_id):
+        model = self._discussion_model if kind == 'discussion' else self._activity_model
+        index = model.indices.get(record_id)
+        return model.rows[index] if index is not None else None
+
+    @Property(bool, notify=changed)
+    def draftEditable(self):
+        if not self._draft or self.controller.active or self._draft_sources_uncertain or self._draft_account != self.draft_account():
+            return False
+        source = self.draft_source(self._draft['kind'], self._draft['source']['id'])
+        return bool(editable_source(self._draft['kind'], source) and fingerprint(source) == self._draft['source_hash'])
+
+    @Property(str, notify=draftChanged)
+    def draftFeedback(self):
+        return self._draft_feedback
+
+    def update_draft_feedback(self):
+        errors = list(self._draft_input_errors.values()) + constraints(self._draft)
+        self._draft_feedback = ('已保存本机副本' if self._draft_saved else '尚未保存本机副本') + ' v' + str(self._draft['version']) + '\n' + (
+            '\n'.join(errors[:100]) if errors else '本地约束通过；平台当前限制、本人状态和提交资格尚未重新核验。')
+        self.draftChanged.emit()
+
+    @Slot(str, str)
+    def openDraftCopy(self, kind, record_id):
+        def run():
+            account = self.draft_account()
+            if not account or self.controller.active:
+                raise ValueError('请先结束当前操作并选择原账号。')
+            if self._draft_sources_uncertain:
+                raise ValueError('上轮停止或异常退出，显示草稿可能早于已保存意图；仅允许回看／导出已保存副本。')
+            source = self.draft_source(kind, record_id)
+            row = make_copy(kind, source)
+            saved, _ = DraftCopies(data_dir(), account).read()
+            self._draft = next((r for r in saved if r['id'] == row['id']), row)
+            self._draft_account = account
+            self._draft_saved = self._draft['version'] > 0
+            self._draft_input_errors = {}
+            self.update_draft_feedback()
+            self.draftOpened.emit(self._draft)
+            self.changed.emit()
+        self.execute(run)
+
+    @Slot(str)
+    def setDraftContent(self, text):
+        if self.draftEditable and self._draft['kind'] == 'discussion':
+            if len(text) > 12000:
+                self._draft_input_errors['content'] = '讨论输入超过 12000 字符的本地编辑容量；该输入未进入副本，请缩短后再保存／导出。'
+            else:
+                self._draft_input_errors.pop('content', None)
+                self._draft['content'] = text
+            self._draft_saved = False
+            self.update_draft_feedback()
+
+    @Slot(str, 'QVariantMap')
+    def setDraftAnswer(self, question_id, answer):
+        if not self.draftEditable or self._draft['kind'] != 'activity':
+            return
+        if question_id not in {q['id'] for q in self._draft['source']['questions']}:
+            return
+        candidate = dict(question_id=question_id, **{k: v for k, v in answer.items() if k in ('text', 'option_ids')})
+        import copy
+        test = copy.deepcopy(self._draft)
+        test['answers'] = [a for a in test['answers'] if a['question_id'] != question_id] + [candidate]
+        from .draft_copies import validate_copy
+        try:
+            validate_copy(test)
+        except ValueError as exc:
+            self._draft_input_errors[question_id] = str(exc) + '；该输入未进入副本，请修正后再保存／导出。'
+            self._draft_saved = False
+            self.update_draft_feedback()
+            return
+        self._draft_input_errors.pop(question_id, None)
+        self._draft = test
+        self._draft_saved = False
+        self.update_draft_feedback()
+
+    @Slot()
+    def saveDraftCopy(self):
+        def run():
+            if not self.draftEditable:
+                raise ValueError('来源或账号已变化，副本保持只读；请导出保留内容。')
+            if self._draft_input_errors:
+                raise ValueError('存在未进入副本的超容量／非法输入，请先修正。')
+            self._draft = DraftCopies(data_dir(), self._draft_account).save(self._draft)
+            self._draft_saved = True
+            self.update_draft_feedback()
+        self.execute(run)
+
+    @Slot(bool)
+    def exportDraftCopy(self, clipboard):
+        def run():
+            if not self._draft or self._draft_account != self.draft_account():
+                return
+            if self._draft_input_errors:
+                raise ValueError('存在未进入副本的超容量／非法输入，请先修正后再复制／导出。')
+            text = export_text(self._draft)
+            if clipboard:
+                from PySide6.QtGui import QGuiApplication
+                QGuiApplication.clipboard().setText(text)
+                self.notify('人工编辑副本已复制，未触发提交。')
+            else:
+                name, _ = QFileDialog.getSaveFileName(None, '导出人工编辑副本（含正文，仅供自行保管）', 'draft-copy.txt', '文本 (*.txt)')
+                if name:
+                    atomic_write(Path(name), text.encode('utf-8'))
+                    self.notify('编辑副本已导出，包含正文；未触发提交。', 'success')
+        self.execute(run)
+
+    @Slot(result='QVariantList')
+    def listDraftCopies(self):
+        try:
+            rows, _ = DraftCopies(data_dir(), self.draft_account()).read() if self.draft_account() else ([], None)
+            return [dict(id=r['id'], title=r['source']['title'], version=r['version']) for r in rows]
+        except Exception as exc:
+            self.notify(exc, 'danger')
+            return []
+
+    @Slot(str, int)
+    def deleteSavedDraft(self, copy_id, version):
+        def run():
+            if self.controller.active or not self.draft_account():
+                raise ValueError('请先结束当前操作并选择原账号。')
+            DraftCopies(data_dir(), self.draft_account()).delete(copy_id, version)
+            if self._draft and self._draft['id'] == copy_id:
+                self._draft = None
+            self.notify('人工副本已删除；原始草稿与所有防重意图保持。')
+        self.execute(run)
+
+    @Slot(str)
+    def openSavedDraft(self, copy_id):
+        def run():
+            account = self.draft_account()
+            if not account:
+                return
+            rows, _ = DraftCopies(data_dir(), account).read()
+            row = next((r for r in rows if r['id'] == copy_id), None)
+            if row:
+                self._draft, self._draft_account, self._draft_saved = row, account, True
+                self._draft_input_errors = {}
+                self.update_draft_feedback()
+                self.draftOpened.emit(row)
+                self.changed.emit()
+        self.execute(run)
+
+    @Property(str, notify=changed)
+    def aiWarning(self):
+        if self.ai_usage['limit'] and self.ai_usage['requests'] >= self.ai_usage['limit']:
+            return '本次操作 AI 请求已达硬上限；后续请求将留待处理。'
+        if self._ai_token_warning and self.ai_usage['tokens'] >= self._ai_token_warning:
+            return '服务返回 token 已达告警值，未知用量尚未计入；可暂停后续或停止。'
+        return ''
+
+    @Property('QVariantList', notify=changed)
+    def runHistory(self):
+        return self.history_rows
+
+    @Property(str, notify=changed)
+    def historyError(self):
+        return self.history_error
+
+    @Slot()
+    def loadRunHistory(self):
+        account = 'offline-demo' if self.demo_mode else self.account_store.active if self.account_store else ''
+        self.history_rows = []
+        self.history_error = ''
+        if account:
+            try:
+                self.history_rows = RunHistory(data_dir(), account).read()[0]
+            except Exception as exc:
+                self.history_error = self.redact(exc)
+        self.changed.emit()
+
+    def save_run_summary(self, state):
+        if not self._history_run:
+            return False
+        try:
+            counts = dict(self._task_model.counts)
+            self.refresh_redactor()
+            tasks = [dict({k: self._redactor(str(t[k]))[:200] for k in ('title', 'course', 'status')},
+                          **{k: str(t[k])[:256] for k in ('courseId', 'clazzId', 'pointId') if t.get(k)})
+                     for t in self.tasks if t['status'] != 'success'][:1000]
+            summary = dict(id=self._history_run, time=self._history_time, state=state,
+                           counts=counts, total=len(self.tasks), retained=len(tasks), tasks=tasks,
+                           courses=[dict(title=self._redactor(c['title'])[:200], courseId=str(c['courseId']), clazzId=str(c['clazzId'])) for c in self.courses
+                                    if course_key(c) in self.selected][:1000],
+                           policy=diagnostic_config(defaults() if self.demo_mode else self.config), ai=dict(self.ai_usage))
+            RunHistory(data_dir(), self._history_account).save(summary)
+            self.history_error = ''
+            return True
+        except Exception as exc:
+            self.history_error = '运行摘要未保存：' + self.redact(exc)
+            self.changed.emit()
+            return False
+
+    @Slot(str)
+    def prepareRecovery(self, run_id):
+        def run():
+            if self.controller.active:
+                raise ValueError('请先结束当前操作。')
+            self.loadRunHistory()
+            summary = next((r for r in self.history_rows if r['id'] == run_id), None)
+            if not summary:
+                raise ValueError('摘要已变化，请重新打开运行摘要。')
+            wanted = {(t['courseId'], t['clazzId']) for t in summary['tasks'] if all(k in t for k in ('courseId', 'clazzId'))}
+            if not wanted:
+                raise ValueError('该摘要没有可定位的未完成课程；旧摘要仅供回看，请手动重新读课。')
+            account = self.account_store.active if self.account_store else ''
+            uid = self.account_store.get(account)['uid'] if account else ''
+            if not self.demo_mode and (not account or not uid):
+                raise ValueError('请先连接原账号并核实身份，再读取课程。')
+            self._recovery = dict(account=account, uid=uid, wanted=wanted, demo=self.demo_mode)
+            try:
+                self.begin('courses', self.demo_mode)
+            except Exception:
+                self._recovery = None
+                raise
+            self.pageRequested.emit(0)
+        self.execute(run)
+
+    @Property('QVariantMap', notify=changed)
+    def serviceHealth(self):
+        return {key: self.service_health(key) for key in (*self.provider_order, 'ai')}
+
+    @Property('QVariantList', notify=changed)
+    def attentionRows(self):
+        return [dict(row) for row in self._attention_model.rows]
+
+    @Property(QObject, constant=True)
+    def attentionModel(self):
+        return self._attention_filter
+
+    @Slot(str, str)
+    def filterAttention(self, query, bucket):
+        self._attention_filter.set_filter(query, bucket)
+
     @Property("QVariantMap", notify=inputChanged)
     def input(self):
         return self.interaction
@@ -241,7 +586,67 @@ class Backend(QObject):
     def providers(self):
         enabled = self.enabled_providers()
         return [dict(key=k, title=PROVIDER_SPECS[k].title, enabled=k in enabled,
-                     secret=PROVIDER_SPECS[k].secret) for k in self.provider_order]
+                     secret=PROVIDER_SPECS[k].secret,
+                     configured=bool(self.config['question_bank'].get(PROVIDER_SPECS[k].secret, '')),
+                     health=self.service_health(k)) for k in self.provider_order]
+
+    def service_fingerprint(self, key):
+        import hashlib
+        sections = ('ai',) if key == 'ai' else ('question_bank',)
+        return hashlib.sha256(repr([(s, sorted(self.config[s].items())) for s in sections]).encode()).hexdigest()
+
+    def service_health(self, key):
+        check = self.service_checks.get(key)
+        if not check:
+            return '尚未测试'
+        return (check['time'] + ' · ' + check['message'] if check['fingerprint'] == self.service_fingerprint(key)
+                else '配置已变化 · 上次测试已过期')
+
+    @Property(str, notify=configChanged)
+    def aiDestination(self):
+        from urllib.parse import urlsplit
+        try:
+            host = urlsplit(self.config['ai']['endpoint']).hostname or '未配置服务地址'
+        except ValueError:
+            host = '服务地址格式需检查'
+        return self.redact(self.config['ai']['provider'] + ' · ' + host)
+
+    def remember_check(self, key, message):
+        self.service_checks[key] = dict(time=datetime.now().strftime('%m-%d %H:%M:%S'),
+                                       fingerprint=self.service_fingerprint(key), message=self.redact(message))
+        self.providersChanged.emit()
+
+    @Property(str, notify=changed)
+    def strategySummary(self):
+        c = defaults() if self.demo_mode else self.config
+        on = lambda s, k: c[s][k].lower() == 'true'
+        row = self.account_store.get(self.account_store.active) if self.account_store else None
+        banks = [PROVIDER_SPECS[k].title for k in c['question_bank']['providers'].split(',') if k in PROVIDER_SPECS]
+        lines = [f"账号：{'离线示例' if self.demo_mode else row['label'] if row else '未选择'}",
+                 f"课程：已选 {len(self.selected)} 门（搜索隐藏 {self.summary['hiddenCount']} 门）",
+                 f"章节并发 {c['common']['jobs']} · 倍速 {c['common']['speed']} · 重做 {'开启，最多 ' + c['common']['work_max_retries'] + ' 次' if on('common', 'work_redo_enabled') else '关闭'}",
+                 '题库顺序：' + (' → '.join(banks) or '关闭'),
+                 f"AI {'开启' if on('ai', 'enabled') else '关闭'} · 图片识别 {'开启' if on('ai', 'vision') else '关闭'} · 人工 {'开启' if on('desktop', 'manual_fallback') else '关闭'} · 随机 {'开启' if on('desktop', 'random_fallback') else '关闭'}",
+                 'AI 发送目标：' + (self.aiDestination if not self.demo_mode and on('ai', 'enabled') else '不发送'),
+                 '测验：' + ('完整作答后自动提交' if on('tiku', 'submit') else '仅保存'),
+                 '讨论：' + ('自动发布' if on('discussion', 'auto_submit') else '仅本地草稿') if on('discussion', 'enabled') else '讨论：关闭',
+                 '投票／问卷：' + ('自动提交' if on('activity', 'auto_submit') else '仅本地草稿') if on('activity', 'enabled') else '投票／问卷：关闭',
+                 '结束通知：' + (c['notification']['provider'] or '关闭'),
+                 '离线演示：零平台写入、零服务请求' if self.demo_mode else '外部请求：平台读取与学习上报；启用的题库／AI 接收题干、选项及可能的图片链接；通知发送运行计数。']
+        return self.redact('\n'.join(lines))
+
+    @Property(str, constant=True)
+    def dataExplanation(self):
+        return ('当前数据 profile：' + str(data_dir()) + '\n\n'
+                'settings.ini：策略与受 DPAPI 保护的服务凭据；登录密码不持久化。\n'
+                'accounts.json 与 accounts/：账号索引与受保护的会话。DPAPI 绑定 Windows 用户和设备，复制文件不保证跨机解密。\n'
+                'discussions/ 与 activities/：草稿、正文／答案及发布／提交意图。内容未使用凭据加密封装；未决意图用于防重复，不能当缓存删除。\n'
+                'run_summaries/：按账号隔离的最近 20 轮摘要，每账号最多 2 MiB，每轮最多 1000 个未完成章节标题。包含课程名，不含题干或答案；每 2 秒最多保存一次。摘要不能作为提交证据，也不会自动重放请求。\n'
+                'draft_copies/：按账号隔离的人工编辑副本，最多 20 项 / 2 MiB，含正文和原题，未加密。与生产草稿／意图独立，不能作为提交证据。\n'
+                'ai_profiles.json：最多 20 个命名 AI 配置；配置与独立凭据用 DPAPI 加密，不会自动切换服务。完整 INI 不包含这些档案。\n'
+                'logs/（或自选目录）：已脱敏日志，单文件约 10 MiB、总量 100 MiB、保留 14 天。课程与题目内容未自动匿名。日志导出仅含当前保留快照。\n\n'
+                '备份清单：关闭应用后保留整个 profile，包括 settings、accounts、discussions、activities、run_summaries、draft_copies、ai_profiles.json。INI 不是完整备份。恢复前保留原件；跨机凭据需重新配置。\n'
+                '排障配置仅含允许的非敏感策略和版本，不含地址、账号、密钥、正文或未知扩展字段。完整 INI 含明文凭据，仅用于可信的个人备份。')
 
     def notify(self, message, tone="info"):
         self.message, self.tone = self.redact(message), tone
@@ -268,6 +673,16 @@ class Backend(QObject):
         return self.account_store.cookie_path(self.account_store.active)
 
     def reset_account_view(self):
+        self._recovery = None
+        self._draft = None
+        self._draft_account = ''
+        self._attention_model.clear()
+        self._attention_filter.set_filter('', '')
+        self.history_rows = []
+        self.history_error = ''
+        self._approved_policy = None
+        self._start_confirmation = None
+        self.ai_usage = dict(requests=0, limit=0, known=0, unknown=0, tokens=0)
         self._discussion_model.clear()
         self._activity_model.clear()
         self.courses, self.selected, self.course_identity = [], set(), None
@@ -443,6 +858,7 @@ class Backend(QObject):
             validate(config, login=True, cookie_path=self.cookie_path())
         if action == "check_bank":
             target = selected[0]
+            self.check_target = target
             isolated = parse_text(serialize(config))
             isolated["question_bank"]["providers"] = target
             isolated["ai"]["enabled"] = "false"
@@ -472,6 +888,8 @@ class Backend(QObject):
             validate(isolated, services=True)
             config = isolated
         self.operation, self.outcome = action, False
+        self.ai_usage = dict(requests=0, limit=int(config['ai']['request_limit']), known=0, unknown=0, tokens=0)
+        self._ai_token_warning = int(config['ai']['token_warning'])
         self.operation_account = self.account_store.active if self.account_store and not demo and action in ('courses', 'run') else ''
         payload = to_payload(config)
         self.log_redactor = Redactor(payload)
@@ -480,6 +898,8 @@ class Backend(QObject):
             self.demo_mode = demo
             self.coursesChanged.emit()
         if action == "run":
+            self._run_completed = False
+            self._attention_model.clear()
             self._task_model.reset([])
             self._question_model.clear()
             self._discussion_model.clear()
@@ -501,6 +921,12 @@ class Backend(QObject):
             command.update(account_id=self.operation_account,
                            account_uid=self.account_store.get(self.operation_account)['uid'])
         self.controller.start(command)
+        if action == 'run':
+            self._history_account = 'offline-demo' if demo else self.operation_account
+            self._history_run = self.controller.run_id
+            self._history_time = datetime.now().astimezone().isoformat(timespec='seconds')
+            self.history_error = ''
+            self.save_run_summary('运行中 / 若已退出则为中断快照')
 
     @Slot()
     def loadDemo(self):
@@ -515,8 +941,68 @@ class Backend(QObject):
         def start():
             if not self.selected:
                 raise ValueError("请至少选择一门课程。")
+            validate(defaults() if self.demo_mode else self.config)
+            policy = serialize(self.config)
+            writing = not self.demo_mode and (self.config['tiku']['submit'].lower() == 'true' or any(
+                self.config[s]['enabled'].lower() == 'true' and self.config[s]['auto_submit'].lower() == 'true'
+                for s in ('discussion', 'activity')))
+            if writing and self._approved_policy != policy:
+                self._start_confirmation = (policy, self.identity(), tuple(sorted(self.selected)))
+                self.startConfirmationRequested.emit(self.strategySummary)
+                return
             self.begin("run", self.demo_mode, [list(k) for k in sorted(self.selected)])
         self.execute(start)
+
+    @Slot()
+    def confirmStartTasks(self):
+        pending, self._start_confirmation = self._start_confirmation, None
+        if not pending or pending != (serialize(self.config), self.identity(), tuple(sorted(self.selected))):
+            self.notify('账号、课程或策略已变化，请重新查看摘要后开始。', 'warning')
+            return
+        self._approved_policy = pending[0]
+        self.startTasks()
+
+    @Slot()
+    def cancelStartTasks(self):
+        self._start_confirmation = None
+
+    @Slot()
+    def verifyPending(self):
+        self._verify(False)
+
+    @Slot()
+    def verifyRecords(self):
+        self._verify(True)
+
+    def _verify(self, records):
+        def run():
+            if self.controller.active:
+                raise ValueError('请先结束当前操作。')
+            if self.demo_mode:
+                self.notify('离线演示不读取平台；只读核验须先读取真实课程。')
+                return
+            if self.identity() != self.course_identity:
+                raise ValueError('账号或会话已变化，请重新读取课程。')
+            targets = [{k: t[k] for k in ('id', 'courseId', 'clazzId', 'pointId')}
+                       for t in self.tasks if (records or t['status'] != 'success')
+                       and all(k in t for k in ('courseId', 'clazzId', 'pointId'))]
+            if not targets:
+                raise ValueError('当前没有可定位的待核验章节，请先读取并运行课程。')
+            config = defaults()
+            config['common'].update(username=self.config['common']['username'], password='', use_cookies='true')
+            validate(config, login=True, cookie_path=self.cookie_path())
+            self.operation, self.outcome = 'verify', False
+            self.operation_account = self.account_store.active
+            payload = to_payload(config)
+            self.log_redactor = Redactor(payload)
+            self.mode = '只读章节核验'
+            self.controller.start(dict(action='verify', config=payload, demo=False, targets=targets,
+                                       verify_records=records,
+                                       data_dir=str(data_dir()), account_id=self.operation_account,
+                                       cookie_mtime_ns=self.cookie_path().stat().st_mtime_ns,
+                                       account_uid=self.account_store.get(self.operation_account)['uid']))
+            self.notify('仅读取章节' + ('及本人讨论／活动状态' if records else '完成状态') + '；不生成、不写入，未决意图保留。')
+        self.execute(run)
 
     @Slot(bool, str)
     def filterQuestions(self, pending_only, task):
@@ -562,6 +1048,7 @@ class Backend(QObject):
             validate(self.config)
             cfg = self.config['activity']
             if cfg['choice_strategy'] == 'random' and cfg['text_strategy'] == 'fixed_good':
+                self.ai_usage = dict(requests=0, limit=0, known=0, unknown=0, tokens=0)
                 from types import SimpleNamespace
                 from .activity import ActivityGenerator, preview_context
                 from .answers import AnswerRouter
@@ -587,6 +1074,7 @@ class Backend(QObject):
             if not topic.strip() or len(topic) > 12000:
                 raise ValueError('请填写不超过 12000 字符的示例讨论主题。')
             if self.config['discussion']['reply_level'] == 'fixed_good':
+                self.ai_usage = dict(requests=0, limit=0, known=0, unknown=0, tokens=0)
                 self.discussion_preview = dict(content='好', level='fixed_good', reason='本地固定回复 · 模型调用 0 次 · 不发布')
                 self.changed.emit()
                 return
@@ -626,16 +1114,20 @@ class Backend(QObject):
         if self.controller.active:
             return
         def run():
-            from .declarative import TEMPLATE, validate_definition
+            from .declarative import TEMPLATE, validate_definition, preview_definition
             import json
             if action == 'import':
                 name, _ = QFileDialog.getOpenFileName(None, '导入声明式 JSON（不执行 handler）', '', 'JSON (*.json)')
                 if not name:
                     return
-                text = Path(name).read_text(encoding='utf-8-sig')
-                definition = validate_definition(text)
-                self.setValue('question_bank', 'declarative_definition', json.dumps(definition, ensure_ascii=False))
-                self.notify('已导入受限题库定义，Token 需单独填写并保存。', 'success')
+                with Path(name).open('rb') as source:
+                    raw = source.read(65540)
+                if len(raw) > 65539:
+                    raise ValueError('题库定义超过 64 KiB')
+                definition, preview = preview_definition(raw.decode('utf-8-sig'))
+                self._definition_import = (json.dumps(definition, ensure_ascii=False),
+                                           self.config['question_bank']['declarative_definition']) if definition else None
+                self.definitionPreviewRequested.emit(self.redact(preview), definition is not None)
             else:
                 text = self.config['question_bank']['declarative_definition']
                 definition = validate_definition(text) if text.strip() else TEMPLATE
@@ -643,6 +1135,17 @@ class Backend(QObject):
                 if name:
                     Path(name).write_text(json.dumps(definition, ensure_ascii=False, indent=2), encoding='utf-8')
         self.execute(run)
+
+    @Slot(bool)
+    def finishDefinitionImport(self, accepted):
+        pending, self._definition_import = self._definition_import, None
+        if not accepted or not pending:
+            return
+        if self.controller.active or self.config['question_bank']['declarative_definition'] != pending[1]:
+            self.notify('当前定义或运行状态已变化，请重新导入预览。', 'warning')
+            return
+        self.setValue('question_bank', 'declarative_definition', pending[0])
+        self.notify('已导入受限定义，Token 需单独填写并保存。', 'success')
 
     @Slot()
     def checkAi(self):
@@ -653,6 +1156,8 @@ class Backend(QObject):
             command()
         except Exception as exc:
             self.notify(exc, "danger")
+            if hasattr(exc, 'section'):
+                self.locate_invalid_field(exc)
 
     @Slot()
     def stop(self):
@@ -667,6 +1172,8 @@ class Backend(QObject):
         if len(line) > LogModel.MAX_LINE_CHARS:
             line = line[:LogModel.MAX_LINE_CHARS - 20] + " …[日志过长，已截断]"
         self._log_model.append(line)
+        if not self._progress_timer.isActive():
+            self._progress_timer.start()
         try:
             self.log_store.append(self.config['logging']['directory'], line)
         except (OSError, ValueError) as exc:
@@ -683,12 +1190,58 @@ class Backend(QObject):
     def on_log_written(self):
         if self.log_save_error:
             self.log_save_error = ''
-            self.changed.emit()
+        if not self._progress_timer.isActive():
+            self._progress_timer.start()
 
     def on_event(self, event):
         if event.get('run_id', self.controller.run_id) != self.controller.run_id:
             return
         kind = event.get("type")
+        if kind == 'ai_usage':
+            self.ai_usage = {k: event[k] for k in ('requests', 'limit', 'known', 'unknown', 'tokens')}
+            if not self._progress_timer.isActive():
+                self._progress_timer.start()
+            return
+        if kind == 'verification':
+            if (self.operation != 'verify' or not self.operation_account or not self.account_store
+                    or self.account_store.active != self.operation_account):
+                return
+            row = self._task_model.indices.get(event['id'])
+            if row is not None:
+                task = self.tasks[row]
+                task.update(checked_at=event['checked_at'], evidence=event['reason'])
+                if event['confirmed']:
+                    self._task_model.update_status(event['id'], 'success')
+                elif task['status'] == 'success':
+                    self._task_model.update_status(event['id'], 'pending')
+                self._attention_model.upsert('章节:' + task['id'], chapter_issue(task))
+                self.changed.emit()
+            return
+        if kind == 'verification_done':
+            self.outcome = True
+            self.mode = '只读核验已结束'
+            self.notify(event['message'], 'info')
+            return
+        if kind == 'record_verification':
+            if (self.operation != 'verify' or not self.operation_account or not self.account_store
+                    or self.account_store.active != self.operation_account):
+                return
+            label = '讨论' if event['kind'] == 'discussion' else '投票／问卷'
+            model = self._discussion_model if event['kind'] == 'discussion' else self._activity_model
+            detail = model.detail(event['id'])
+            task_index = self._task_model.indices.get(event['task_id'])
+            if task_index is None:
+                return
+            task = self.tasks[task_index]
+            # Evidence is a separate view, never overwrite drafts or intent states.
+            self._attention_model.upsert('核验:' + label + ':' + event['id'],
+                dict(id=event['id'], task=event['task_id'], kind=label, title=detail.get('title', task['title']),
+                     course=task['course'], status={'existing': '本人已参与', 'absent': '本次未发现', 'unknown': '证据不足'}[event['participation']],
+                     bucket='platform', reason=event['checked_at'] + '\n' + event['reason'] + '\n任务点：' +
+                     ('已确认' if event['task_status'] == 'confirmed' else '待确认'),
+                     next='在平台检查当前本人记录。历史与本地未决意图保持，不提供强制重发。'))
+            self.changed.emit()
+            return
         if kind in ('activity_result', 'activity_preview'):
             if event['record']['run_id'] != self.controller.run_id:
                 return
@@ -698,15 +1251,19 @@ class Backend(QObject):
                 self.activity_preview = dict(content=detail_text(record), reason=record['reason'])
                 self.mode = '投票／问卷预览已完成'
                 self.notify('预览已完成，请逐题检查来源与校验结果。', 'success')
-            elif self._activity_model.upsert(record) and not self._progress_timer.isActive():
-                self._progress_timer.start()
+            elif self._activity_model.upsert(record):
+                self._attention_model.upsert('投票／问卷:' + record['id'], record_issue('投票／问卷', record))
+                if not self._progress_timer.isActive():
+                    self._progress_timer.start()
             return
         if kind == 'discussion_result':
             if event['record']['run_id'] != self.controller.run_id:
                 return
             record = safe_discussion(event['record'], lambda text: self.redact(self.log_redactor(text)))
-            if self._discussion_model.upsert(record) and not self._progress_timer.isActive():
-                self._progress_timer.start()
+            if self._discussion_model.upsert(record):
+                self._attention_model.upsert('讨论:' + record['id'], record_issue('讨论', record))
+                if not self._progress_timer.isActive():
+                    self._progress_timer.start()
             return
         if kind == 'discussion_preview':
             self.outcome = True
@@ -748,6 +1305,7 @@ class Backend(QObject):
             redactor = self._redactor
             record = safe_record(event['record'], lambda text: redactor(self.log_redactor(text)))
             if self._question_model.upsert(record):
+                self._attention_model.upsert('题目:' + record['id'], record_issue('题目', record))
                 self._question_revision += 1
                 if not self._progress_timer.isActive():
                     self._progress_timer.start()
@@ -759,6 +1317,7 @@ class Backend(QObject):
         if kind == 'bank_check':
             self.outcome = True
             self.bank_status = event['message']
+            self.remember_check(self.check_target, event['message'])
             self.notify(self.bank_status, 'success' if event.get('ok') else 'warning')
             return
         if kind == "log":
@@ -772,12 +1331,30 @@ class Backend(QObject):
             self.coursesChanged.emit()
             self.mode = "离线演示 · 示例数据" if self.demo_mode else "课程已读取"
             self.notify(f"已读取 {len(self.courses)} 门{'演示' if self.demo_mode else '真实'}课程。", "success")
+            recovery, self._recovery = self._recovery, None
+            if recovery:
+                account = self.account_store.active if self.account_store else ''
+                uid = self.account_store.get(account)['uid'] if account else ''
+                if recovery['demo'] == self.demo_mode and (self.demo_mode or (account, uid) == (recovery['account'], recovery['uid'])):
+                    live = {course_key(c) for c in self.courses}
+                    self.selected = recovery['wanted'] & live
+                    missing = len(recovery['wanted'] - live)
+                    self.coursesChanged.emit()
+                    self.notify(f'已重新读课并选择 {len(self.selected)} 门可定位课程，另有 {missing} 门未找到。请检查策略后手动开始；新轮会重读平台状态。', 'warning')
+                else:
+                    self.notify('账号身份已变化，未恢复课程选择。请重新读取原账号课程。', 'warning')
         elif kind == "tasks":
+            self._attention_model.clear()
             self._task_model.reset([dict(t, status="waiting") for t in event["tasks"]])
             self.notify("正在处理章节。本轮进度不表示课程学分完成比例。")
         elif kind == "task":
             if self._task_model.update_status(event["id"], event["status"]) and not self._progress_timer.isActive():
                 self._progress_timer.start()
+            row = self._task_model.indices.get(event['id'])
+            if row is not None:
+                self._attention_model.upsert('章节:' + event['id'], chapter_issue(self.tasks[row]))
+            if self.operation == 'run' and self._history_run and not self._history_timer.isActive():
+                self._history_timer.start()
             return
         elif kind == "media":
             self._task_model.update_media(event['id'], event)
@@ -785,6 +1362,7 @@ class Backend(QObject):
         elif kind == "ai_check":
             self.outcome = True
             self.ai_status = "服务响应正常 · 图片识别仍需实测"
+            self.remember_check('ai', self.ai_status)
             self.notify("AI 连接测试通过。", "success")
         elif kind == "input":
             if self.controller.stopping:
@@ -800,16 +1378,21 @@ class Backend(QObject):
             self.inputChanged.emit()
             self.notify("等待人工处理，请检查题目后使用答案或跳过。", "warning")
         elif kind == "done":
+            self._run_completed = True
             self.outcome = True
             self.mode = "离线演示 · 示例数据" if event.get("demo") else "任务已结束"
             text = f"{'演示结束' if event.get('demo') else '任务结束'} · 已完成章节 {event['success']}，待完成章节 {event['pending']}，失败章节 {event['failed']}，跳过章节 {event['skipped']}"
             self.append_log(text)
             self.notify(text + ("。待完成 / 未核验章节请在平台确认。" if event['pending'] else ""), "danger" if event['failed'] else "warning" if event['pending'] or event['skipped'] else "success")
         elif kind in ("error", "cancelled"):
+            self._recovery = None
             self.outcome = True
             self.mode = "已停止" if kind == "cancelled" else "运行失败"
             if self.operation == "check_ai":
                 self.ai_status = "测试未通过 · 请检查参数"
+                self.remember_check('ai', event.get('message', self.ai_status))
+            elif self.operation == 'check_bank':
+                self.remember_check(self.check_target, event.get('message', '测试失败'))
             self.append_log(event.get("message", "后台运行失败"), "ERROR")
             self.notify(event.get("message", "后台运行失败"), "warning" if kind == "cancelled" else "danger")
         self.changed.emit()
@@ -826,18 +1409,31 @@ class Backend(QObject):
         self.clear_input()
 
     def on_finished(self, code):
+        self._recovery = None
+        if self.operation == 'run':
+            self._draft_sources_uncertain = not (self._run_completed and code == 0 and not self.controller.stopping)
         self.clear_input()
-        for task in self.tasks:
-            if task["status"] not in TERMINAL:
-                self._task_model.update_status(task["id"], "stopped")
+        if self.operation != 'verify':
+            for task in self.tasks:
+                if task["status"] not in TERMINAL:
+                    self._task_model.update_status(task["id"], "stopped")
+                    self._attention_model.upsert('章节:' + task['id'], chapter_issue(task))
         self._progress_timer.stop()
         self._log_model.flush()
+        self._history_timer.stop()
         if self.controller.stopping:
             self.mode = "已停止"
             self.notify("后台已停止。已发送到平台的请求不会撤销，可重新开始。", "warning")
         elif not self.outcome:
             self.mode = "后台异常退出"
             self.notify(f"后台退出（{code}），未收到完成结果。请检查软件目录及日志。", "danger")
+        if self.operation == 'run':
+            saved = self.save_run_summary(self.mode)
+            error = self.history_error
+            self.loadRunHistory()
+            if not saved:
+                self.history_error = error
+            self._history_run = ''
         self.changed.emit()
 
     @Slot(result=bool)
@@ -856,7 +1452,35 @@ class Backend(QObject):
         except Exception as exc:
             self.save_state = "保存失败 · 未保存"
             self.notify(exc, "danger")
+            self.locate_invalid_field(exc)
             return False
+
+    def locate_invalid_field(self, error=None):
+        import math
+        if hasattr(error, 'section'):
+            for page, groups in SCHEMA.items():
+                if any(f['section'] == error.section and f['key'] == error.key for g in groups for f in g['fields']):
+                    self.pageRequested.emit(1 if page == 'learning' else 3 if page == 'advanced' else 2)
+                    self.fieldRequested.emit(error.section, error.key)
+                    return
+            if error.section == 'question_bank':
+                self.pageRequested.emit(2)
+                self.fieldRequested.emit(error.section, error.key)
+            return
+        for page, groups in SCHEMA.items():
+            for group in groups:
+                for spec in group['fields']:
+                    if spec['kind'] not in ('integer', 'number'):
+                        continue
+                    try:
+                        raw = self.config[spec['section']][spec['key']]
+                        value = int(raw) if spec['kind'] == 'integer' else float(raw)
+                        if not math.isfinite(value) or not spec['low'] <= value <= spec['high']:
+                            raise ValueError()
+                    except ValueError:
+                        self.pageRequested.emit(1 if page == 'learning' else 3 if page == 'advanced' else 2)
+                        self.fieldRequested.emit(spec['section'], spec['key'])
+                        return
 
     @Slot(result=bool)
     def close(self):
@@ -927,13 +1551,18 @@ class Backend(QObject):
                 self.setValue('common', 'use_cookies', 'false')
                 self.reset_account_view()
                 self.notify("当前账号的本机 Cookie 已清除，其他账号会话已保留。")
+            elif action == 'export_diagnostics':
+                name, _ = QFileDialog.getSaveFileName(None, '导出排障配置（不含凭据）', 'diagnostics.ini', 'INI (*.ini)')
+                if name:
+                    atomic_write(Path(name), diagnostic_config(self.config).encode('utf-8'))
+                    self.notify('排障配置已导出；仅包含策略与版本，不含会话或内容。', 'success')
             elif action in ("export_config", "export_logs"):
                 is_config = action == "export_config"
                 if is_config:
                     validate(self.config)
                 name, _ = QFileDialog.getSaveFileName(None, "导出完整 INI（包含密码与密钥）" if is_config else "导出已脱敏日志", "config.ini" if is_config else "chaoxing-desktop.log", "INI (*.ini)" if is_config else "日志 (*.log)")
                 if name:
-                    Path(name).write_text(serialize(self.config) if is_config else self.redact(self.log_redactor("\n".join(self.logs))), encoding="utf-8")
+                    atomic_write(Path(name), (serialize(self.config) if is_config else self.redact(self.log_redactor("\n".join(self.logs)))).encode('utf-8'))
                     self.notify("文件已导出。", "success")
         self.execute(run)
 

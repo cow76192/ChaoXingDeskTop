@@ -8,6 +8,38 @@ Basic.Dialog {
     objectName: "manualDialog"
     property var selected: []
     property string hint: ""
+    property var previousFocus: null
+    function focusFirst(item) {
+        if (!item.visible || !item.enabled) return false
+        if (item.activeFocusOnTab) {
+            item.forceActiveFocus()
+            let p = item.parent
+            while (p) {
+                if (p.contentY !== undefined && p.contentItem) {
+                    p.contentY = Math.max(0, Math.min(p.contentHeight - p.height, item.mapToItem(p.contentItem, 0, 0).y - 20))
+                    break
+                }
+                p = p.parent
+            }
+            return true
+        }
+        for (let child of item.children || []) if (focusFirst(child)) return true
+        return false
+    }
+    function revealFocused() {
+        let item = dialog.parent.Window.window.activeFocusItem
+        if (!item) return
+        let p = item.parent
+        while (p) {
+            if (p.contentY !== undefined && p.contentItem) {
+                p.contentY = Math.max(0, Math.min(p.contentHeight - p.height, item.mapToItem(p.contentItem, 0, 0).y - 20))
+                return
+            }
+            p = p.parent
+        }
+    }
+    onOpened: Qt.callLater(function() { dialog.focusFirst(dialog.contentItem); Qt.callLater(dialog.revealFocused) })
+    onClosed: if (previousFocus && previousFocus.visible && previousFocus.enabled) previousFocus.forceActiveFocus()
     parent: Overlay.overlay
     anchors.centerIn: parent
     width: Math.min(760, parent ? parent.width - 80 : 760)
@@ -21,6 +53,7 @@ Basic.Dialog {
         target: bridge
         function onInputChanged() {
             if (Object.keys(bridge.input).length > 0) {
+                if (!dialog.opened) dialog.previousFocus = dialog.parent.Window.window.activeFocusItem
                 dialog.selected = []; answer.text = ""; dialog.hint = ""
                 for (let i = 0; i < blanks.count; ++i) blanks.itemAt(i).clear()
                 dialog.open()
@@ -43,6 +76,7 @@ Basic.Dialog {
                         Layout.fillWidth: true
                         Image { id: preview; source: modelData; sourceSize.width: 1024; sourceSize.height: 1024; asynchronous: true; fillMode: Image.PreserveAspectFit; Layout.fillWidth: true; Layout.preferredHeight: status === Image.Ready ? Math.min(220, sourceSize.height) : 40 }
                         Text { visible: preview.status === Image.Error; text: "图片加载失败，请在学习平台查看原题。"; color: "#b45309"; font.pixelSize: 12 }
+                        Text { visible: preview.status === Image.Loading; text: "正在加载题目图片…"; color: "#627086"; font.pixelSize: 12 }
                     }
                 }
                 ButtonGroup { id: singleGroup }

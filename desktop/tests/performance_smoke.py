@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QSG_RHI_BACKEND", "software")
 from PySide6.QtTest import QTest
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QObject, QTimer
 from PySide6.QtWidgets import QApplication
 from shiboken6 import delete
 from chaoxing_desktop.qml_app import configure_app, create_engine
@@ -51,6 +51,7 @@ def main():
     parser.add_argument('--max-round-seconds',type=float,default=0)
     parser.add_argument('--max-heartbeat-p95-ms',type=float,default=0)
     parser.add_argument("--output", type=Path)
+    parser.add_argument('--attention', action='store_true', help='Render the aggregated pending-items view during the workload')
     args = parser.parse_args()
     if args.output:
         args.output = args.output.resolve()
@@ -63,6 +64,8 @@ def main():
         assert engine.rootObjects(), engine.load_warnings
         window = engine.rootObjects()[0]
         window.setProperty("pageIndex", 4)
+        if args.attention:
+            window.findChild(QObject, 'resultTabs').setProperty('currentIndex', 4)
         QTest.qWait(150)
         samples = [{"phase": "startup", "memory_mb": memory_mb()}]
         heartbeats=[];previous=[time.perf_counter()]

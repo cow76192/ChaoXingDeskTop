@@ -31,7 +31,7 @@ ScrollView {
             Layout.fillWidth: true; Layout.alignment: Qt.AlignTop
             title: "回复效果预览"
             contentSpacing: 10
-            description: "不启动课程，也不发布回复。前三档会请求已配置 AI 服务，可能消耗额度。"
+            description: "前三档将发送下面的示例主题到 " + bridge.aiDestination + "，可能消耗额度；不读取课程或发布。固定好完全本地。"
             Label { text: "示例讨论主题"; color: "#34435a" }
             ScrollView {
                 Layout.fillWidth: true; Layout.preferredHeight: 75; clip: true
@@ -60,7 +60,7 @@ ScrollView {
             }
             RowLayout {
                 Layout.fillWidth: true
-                Text { text: Array.from(bridge.discussionPreview.content).length + " 字符"; color: "#8490a4"; font.pixelSize: 12; Layout.fillWidth: true }
+                Text { text: Array.from(bridge.discussionPreview.content).length + " 字符"; color: "#627086"; font.pixelSize: 12; Layout.fillWidth: true }
                 ActionButton { text: "复制预览"; enabled: !!preview.text; onClicked: { preview.selectAll(); preview.copy(); preview.deselect() } }
             }
         }

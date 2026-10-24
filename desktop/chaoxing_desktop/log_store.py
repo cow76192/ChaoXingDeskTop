@@ -93,6 +93,7 @@ class AsyncLogStore(QObject):
         self.sink_lock = threading.Lock()
         self.queue = deque()
         self.pending_bytes = 0
+        self.peak_bytes = self.failed_batches = self.dropped_lines = 0
         self.thread = None
         self.closing = False
 
@@ -104,9 +105,11 @@ class AsyncLogStore(QObject):
             if self.closing:
                 raise OSError('日志写入已关闭')
             if self.pending_bytes + size > self.MAX_PENDING_BYTES:
+                self.dropped_lines += 1
                 raise OSError('日志写入队列已满，界面记录仍保留')
             self.queue.append(('line', directory, line, size))
             self.pending_bytes += size
+            self.peak_bytes = max(self.peak_bytes, self.pending_bytes)
             if self.thread is None:
                 self.thread = threading.Thread(target=self._run, name='chaoxing-log-writer', daemon=True)
                 self.thread.start()
@@ -135,11 +138,18 @@ class AsyncLogStore(QObject):
             except RuntimeError:
                 return
             except (OSError, ValueError) as exc:
+                with self.condition:
+                    self.failed_batches += 1
                 try:self.failed.emit(str(exc))
                 except RuntimeError:return  # QObject has already been disposed.
             finally:
                 with self.condition:
                     self.pending_bytes -= size
+
+    def metrics(self):
+        with self.condition:
+            return dict(pending_bytes=self.pending_bytes, peak_bytes=self.peak_bytes,
+                        failed_batches=self.failed_batches, dropped_lines=self.dropped_lines)
 
     def flush(self, timeout=3):
         with self.condition:

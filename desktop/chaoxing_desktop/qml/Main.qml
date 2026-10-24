@@ -16,7 +16,7 @@ ApplicationWindow {
     palette.base: "white"
     palette.text: "#17243a"
     palette.buttonText: "#34435a"
-    palette.placeholderText: "#8490a4"
+    palette.placeholderText: "#627086"
     palette.button: "#f4f6fa"
     palette.highlight: "#2563eb"
     palette.highlightedText: "white"
@@ -47,7 +47,7 @@ ApplicationWindow {
     RowLayout {
         anchors.fill: parent; spacing: 0
         Rectangle {
-            Layout.preferredWidth: 216; Layout.fillHeight: true; color: "#eef2f8"
+            Layout.preferredWidth: window.width < 1100 ? 184 : 216; Layout.fillHeight: true; color: "#eef2f8"
             ColumnLayout {
                 anchors.fill: parent; anchors.margins: 18; spacing: 8
                 RowLayout {
@@ -59,7 +59,7 @@ ApplicationWindow {
                         Text { text: "学习工作台"; font.pixelSize: 12; color: "#627086" }
                     }
                 }
-                Text { text: "WORKSPACE"; font.pixelSize: 10; font.letterSpacing: 1.4; color: "#8490a4"; Layout.topMargin: 34; Layout.bottomMargin: 8 }
+                Text { text: "WORKSPACE"; font.pixelSize: 10; font.letterSpacing: 1.4; color: "#627086"; Layout.topMargin: 34; Layout.bottomMargin: 8 }
                 Repeater {
                     model: window.pages
                     delegate: AbstractButton {
@@ -79,13 +79,14 @@ ApplicationWindow {
                 }
                 Item { Layout.fillHeight: true }
                 Rectangle {
+                    visible: window.width >= 1100
                     Layout.fillWidth: true; Layout.preferredHeight: 90; radius: 10; color: "#e3eaf5"
                     Column { anchors.fill: parent; anchors.margins: 13; spacing: 8
                         Text { text: "本地运行 · 数据由你管理"; font.pixelSize: 12; font.bold: true; color: "#53637c" }
                         Text { text: "服务凭据在本机加密保存\n登录密码仅用于当前会话"; font.pixelSize: 11; color: "#627086"; lineHeight: 1.4 }
                     }
                 }
-                Text { text: "v" + bridge.version + "  /  GPL-3.0"; font.pixelSize: 11; color: "#8490a4"; Layout.topMargin: 8 }
+                ActionButton { objectName: "release_info_button"; text: "v" + bridge.version + " · 版本与校验"; Layout.fillWidth: true; onClicked: releaseInfo.open() }
             }
         }
         ColumnLayout {
@@ -120,7 +121,7 @@ ApplicationWindow {
                 CoursesPage {}
                 FormPage { groups: bridge.schema.learning }
                 ServicesPage {}
-                FormPage { groups: bridge.schema.advanced; migration: true }
+                FormPage { objectName: "advancedScroll"; groups: bridge.schema.advanced; migration: true }
                 MonitorPage {}
             }
             RowLayout {
@@ -128,9 +129,22 @@ ApplicationWindow {
                 Rectangle { width: 7; height: 7; radius: 4; color: bridge.summary.saveState.indexOf("失败") >= 0 ? "#dc2626" : bridge.summary.saveState.indexOf("未保存") >= 0 ? "#b45309" : "#15803d" }
                 Text { text: bridge.summary.saveState; color: "#627086"; font.pixelSize: 11 }
                 Item { Layout.fillWidth: true }
-                Text { text: bridge.summary.demo ? "离线演示 · 所有课程与任务均为示例" : "学习工作台 · Qt Quick"; color: "#8490a4"; font.pixelSize: 11 }
+                Text { text: bridge.summary.demo ? "离线演示 · 所有课程与任务均为示例" : "学习工作台 · Qt Quick"; color: "#627086"; font.pixelSize: 11 }
             }
         }
     }
     InputDialog {}
+    DraftEditor {}
+    ReadOnlyDialog {
+        id: releaseInfo; objectName: "releaseInfoDialog"
+        title: "版本、发行说明与校验信息"; width: Math.min(720, window.width - 50); height: Math.min(610, window.height - 50)
+        bodyText: bridge.releaseInfo
+        footer: RowLayout {
+            ActionButton { objectName: "release_latest"; text: "检查版本网页…"; onClicked: bridge.releaseAction("latest") }
+            ActionButton { text: "发行说明…"; onClicked: bridge.releaseAction("notes") }
+            ActionButton { objectName: "copy_verification_info"; text: "复制校验说明"; onClicked: bridge.releaseAction("copy") }
+            Item { Layout.fillWidth: true }
+            ActionButton { text: "关闭"; onClicked: releaseInfo.close() }
+        }
+    }
 }

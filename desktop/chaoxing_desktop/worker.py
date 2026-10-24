@@ -235,6 +235,9 @@ def real(channel, command):
     core = load_core(channel)
     checkpoint(channel)
     account_id = command.get('account_id')
+    verifying = command['action'] == 'verify'
+    if verifying and not account_id:
+        raise ValueError('只读核验需要明确的账号会话。')
     if account_id:
         from .accounts import AccountStore
         from api.cookies import configure_account
@@ -242,10 +245,16 @@ def real(channel, command):
         row = store.get(account_id)
         if not row or row['username'] != command['config']['common']['username']:
             raise ValueError('账号信息已改变，请重新选择账号。')
+        if verifying and (not row['uid'] or command.get('account_uid') != row['uid']):
+            raise ValueError('核验身份不完整或已变化，请重新读取课程。')
+        if verifying and command.get('cookie_mtime_ns') != store.cookie_path(account_id).stat().st_mtime_ns:
+            raise ValueError('核验会话文件已变化，请重新读取课程。')
         configure_account(store.cookie_path(account_id), row['uid'], command['config']['common']['use_cookies'])
     common, notification_config = (command["config"][s] for s in ("common", "notification"))
     # Listing courses must not initialize paid question-bank services.
-    cx = core.create_client(command["config"], channel, courses_only=command["action"] == "courses")
+    if verifying and (not common['use_cookies'] or common['password']):
+        raise ValueError('只读核验仅使用已读取课程的 Cookie 会话，请先重新读课。')
+    cx = core.create_client(command["config"], channel, courses_only=command["action"] in ('courses', 'verify'))
     checkpoint(channel)
     login = cx.login(login_with_cookies=common["use_cookies"])
     if not login.get("status"):
@@ -258,13 +267,18 @@ def real(channel, command):
         uid = cookie_uid(session.cookies.get_dict())
         if not uid or (row['uid'] and row['uid'] != uid):
             raise ValueError('平台会话与当前账号不一致，请重新登录或添加为其他账号。')
-        save_cookies(session)
-        channel.send('session_ready', account_id=account_id, uid=uid,
-                     cookie_mtime_ns=store.cookie_path(account_id).stat().st_mtime_ns)
+        if not verifying:
+            save_cookies(session)
+            channel.send('session_ready', account_id=account_id, uid=uid,
+                         cookie_mtime_ns=store.cookie_path(account_id).stat().st_mtime_ns)
     checkpoint(channel)
     courses = list({(str(c["courseId"]), str(c["clazzId"])): c for c in cx.get_course_list()}.values())
     if command["action"] == "courses":
         channel.send("courses", courses=courses, demo=False)
+        return
+    if verifying:
+        from .verification import verify_chapters
+        verify_chapters(cx, channel, courses, command.get('targets', []), records=command.get('verify_records') is True)
         return
     chosen = select_courses(courses, command.get("selected", []))
     if channel.control:
@@ -286,7 +300,9 @@ def real(channel, command):
                         title=point["title"], course=course["title"], course_data=course, point=point)
             tasks.append(task)
             course_tasks.append(task)
-    channel.send("tasks", tasks=[{k: t[k] for k in ("id", "title", "course")} for t in tasks])
+    channel.send("tasks", tasks=[dict({k: t[k] for k in ("id", "title", "course")},
+                                    courseId=str(t['course_data']['courseId']),
+                                    clazzId=str(t['course_data']['clazzId']), pointId=str(t['point']['id'])) for t in tasks])
     statuses = run_tasks(channel, tasks,
                          lambda t: core.process_chapter(cx, t["course_data"], t["point"], common["speed"], t['id']),
                          common, core.ChapterResult)
@@ -427,7 +443,9 @@ def main() -> int:
                          message='真实连接检查：' + STATE_TEXT[result.status] + '；不代表后续命中率或答案正确率。')
         elif command.get("action") == "check_ai":
             from .answers import AIClient
-            AIClient(command["config"]["ai"]).check_connection()
+            ai = AIClient(command['config']['ai'])
+            ai.attach_channel(channel)
+            ai.check_connection()
             channel.send("ai_check")
         elif command.get('action') == 'discussion_preview':
             from .answers import AnswerRouter, AIClient

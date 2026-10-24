@@ -55,7 +55,7 @@ ColumnLayout {
                     Text { text: modelData.stageText; color: modelData.stage === "resolved" ? "#15803d" : "#b45309"; font.bold: true; font.pixelSize: 12 }
                 }
                 Text { text: (modelData.sourceText ? modelData.sourceText + " · " : "") + modelData.reason; textFormat: Text.PlainText; Layout.fillWidth: true; elide: Text.ElideRight; color: "#627086"; font.pixelSize: 12 }
-                Text { text: "题目 " + modelData.question_id + " · 轮次 " + modelData.attempt + " · 题库 " + modelData.elapsed_ms + " ms / AI " + (modelData.ai_elapsed_ms || 0) + " ms · 点击查看详情"; color: "#8490a4"; font.pixelSize: 11 }
+                Text { text: "题目 " + modelData.question_id + " · 轮次 " + modelData.attempt + " · 题库 " + modelData.elapsed_ms + " ms / AI " + (modelData.ai_elapsed_ms || 0) + " ms · 点击查看详情"; color: "#627086"; font.pixelSize: 11 }
             }
         }
         Text { visible: results.count === 0; anchors.centerIn: parent; text: "暂无逐题记录；离线演示也可体验此功能"; color: "#627086" }

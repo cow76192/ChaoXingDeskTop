@@ -25,8 +25,30 @@ if ($PreviousInstaller) {
     $taskPreviousProfile = (Get-Content -LiteralPath (Join-Path $taskInstalled 'installation.json') -Raw | ConvertFrom-Json).profile
     Set-Content -LiteralPath (Join-Path $taskInstalled 'keep-upgrade-file.txt') -Value 'KEEP_UPGRADE_DATA' -Encoding UTF8
 }
+# Seed only an isolated, synthetic profile before installing/upgrading. Resolve it
+# with the same frozen installation marker rules, without touching LOCALAPPDATA.
+$taskProfile = if ($taskPreviousProfile) { $taskPreviousProfile } else { (Get-Content -LiteralPath (Join-Path $taskStage 'installation.json') -Raw | ConvertFrom-Json).profile }
+$taskLocalData = Join-Path $taskDestination 'synthetic-local-appdata'
+$taskPersonal = Join-Path $taskLocalData ('ChaoxingDesktop/profiles/' + $taskProfile)
+$taskPersonalFiles = @('settings.ini', 'accounts.json', 'account-cookies/synthetic.dat', 'discussions/synthetic.json', 'activities/synthetic.json', 'run_summaries/synthetic.json', 'draft_copies/synthetic.json', 'ai_profiles.json')
+$taskPersonalHashes = @{}
+foreach ($taskRelative in $taskPersonalFiles) {
+    $taskFile = Join-Path $taskPersonal $taskRelative
+    New-Item -ItemType Directory -Force -Path ([System.IO.Path]::GetDirectoryName($taskFile)) | Out-Null
+    Set-Content -LiteralPath $taskFile -Value ('SYNTHETIC_PRESERVATION_SENTINEL:' + $taskRelative) -Encoding UTF8
+    $taskPersonalHashes[$taskRelative] = (Get-FileHash -LiteralPath $taskFile -Algorithm SHA256).Hash
+}
+function Assert-SyntheticProfilePreserved {
+    foreach ($taskRelative in $taskPersonalFiles) {
+        $taskFile = Join-Path $taskPersonal $taskRelative
+        if (-not (Test-Path -LiteralPath $taskFile) -or (Get-FileHash -LiteralPath $taskFile -Algorithm SHA256).Hash -ne $taskPersonalHashes[$taskRelative]) {
+            throw "Installation changed synthetic personal data: $taskRelative"
+        }
+    }
+}
 $taskStart = Start-Process -FilePath $taskInstaller -ArgumentList @('/S', '/NoRegistration', '/NoShortcuts', ('/D=' + $taskInstalled)) -PassThru -Wait -WindowStyle Hidden
 if ($taskStart.ExitCode -ne 0) { throw "Silent installer failed: $($taskStart.ExitCode)" }
+Assert-SyntheticProfilePreserved
 $taskVerified = 0
 foreach ($taskFile in Get-ChildItem -LiteralPath $taskStage -File -Recurse) {
     $taskRelative = $taskFile.FullName.Substring($taskStage.Length).TrimStart('\')
@@ -48,6 +70,18 @@ if ($taskPreviousProfile) {
     if ((Get-Content -LiteralPath (Join-Path $taskInstalled 'keep-upgrade-file.txt') -Raw).Trim() -ne 'KEEP_UPGRADE_DATA') { throw 'Upgrade replaced extra user file' }
 } elseif ($taskMarker.profile -notmatch ('^' + [regex]::Escape($taskVersionPrefix) + '[a-f0-9]{16}$')) { throw 'Unexpected installation profile' }
 $taskPython = Join-Path $taskRoot '.venv-build/Scripts/python.exe'
+$taskResolver = @'
+import os, pathlib, sys
+sys.path.insert(0, sys.argv[1])
+os.environ.pop('CHAOXING_DESKTOP_DATA', None)
+os.environ['LOCALAPPDATA'] = sys.argv[2]
+sys.frozen = True
+sys.executable = sys.argv[3]
+from chaoxing_desktop.config import data_dir
+assert data_dir().resolve() == pathlib.Path(sys.argv[4]).resolve(), 'Installed profile resolver changed'
+'@
+& $taskPython -B -c $taskResolver $taskRoot $taskLocalData (Join-Path $taskInstalled 'ChaoxingDesktop.exe') $taskPersonal
+if ($LASTEXITCODE -ne 0) { throw 'Installed profile resolver failed' }
 $taskRetired = Join-Path $taskRoot 'scripts/retired-runtime-0.3.5.txt'
 foreach ($taskRelative in Get-Content -LiteralPath $taskRetired) {
     if (-not $taskRelative -or $taskRelative.StartsWith('#')) { continue }
@@ -59,10 +93,7 @@ foreach ($taskRelative in Get-Content -LiteralPath $taskRetired) {
 if ($LASTEXITCODE -ne 0) { throw 'Installed worker smoke failed' }
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $taskRoot 'scripts/run_gui_smoke.ps1') -Executable (Join-Path $taskInstalled 'ChaoxingDesktop.exe') -Destination (Join-Path $taskDestination 'gui-smoke') -Platform windows
 if ($LASTEXITCODE -ne 0) { throw 'Installed GUI smoke failed' }
-# Only synthetic data in this test directory; no actual profile is read or changed.
-$taskPersonal = Join-Path $taskDestination 'synthetic-personal-data'
-New-Item -ItemType Directory -Path $taskPersonal | Out-Null
-Set-Content -LiteralPath (Join-Path $taskPersonal 'settings.ini') -Value 'SYNTHETIC_TEST_DATA' -Encoding UTF8
+Assert-SyntheticProfilePreserved
 Set-Content -LiteralPath (Join-Path $taskInstalled 'keep-user-file.txt') -Value 'KEEP_ME' -Encoding UTF8
 $taskUninstall = Start-Process -FilePath (Join-Path $taskInstalled 'Uninstall.exe') -ArgumentList '/S' -PassThru -Wait -WindowStyle Hidden
 if ($taskUninstall.ExitCode -ne 0) { throw 'Uninstaller failed' }
@@ -73,7 +104,7 @@ foreach ($taskName in @('ChaoxingDesktop.exe', 'ChaoxingWorker.exe')) {
 }
 if (-not (Test-Path -LiteralPath (Join-Path $taskInstalled 'keep-user-file.txt'))) { throw 'Uninstall removed extra user file' }
 if ($taskPreviousProfile -and -not (Test-Path -LiteralPath (Join-Path $taskInstalled 'keep-upgrade-file.txt'))) { throw 'Uninstall removed upgrade user file' }
-if (-not (Test-Path -LiteralPath (Join-Path $taskPersonal 'settings.ini'))) { throw 'Uninstall removed synthetic personal data' }
-$taskReport = [ordered]@{ success=$true; verifiedFiles=$taskVerified; profile=$taskMarker.profile; upgradeTested=[bool]$taskPreviousProfile; upgradeProfilePreserved=($taskPreviousProfile -and $taskMarker.profile -eq $taskPreviousProfile); workerProbe=$true; guiSmoke=$true; uninstalled=$true; extraFilePreserved=$true; syntheticDataPreserved=$true; registryAndShortcutsSkipped=$true }
+Assert-SyntheticProfilePreserved
+$taskReport = [ordered]@{ success=$true; verifiedFiles=$taskVerified; profile=$taskMarker.profile; upgradeTested=[bool]$taskPreviousProfile; upgradeProfilePreserved=($taskPreviousProfile -and $taskMarker.profile -eq $taskPreviousProfile); workerProbe=$true; guiSmoke=$true; uninstalled=$true; extraFilePreserved=$true; syntheticDataPreserved=$true; syntheticFilesVerified=$taskPersonalFiles.Count; installedProfileResolved=$true; registryAndShortcutsSkipped=$true }
 $taskReport | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskDestination 'result.json') -Encoding UTF8
 $taskReport | ConvertTo-Json

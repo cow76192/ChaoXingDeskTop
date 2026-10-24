@@ -40,16 +40,26 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Account UI failed' }
           .venv-ci/Scripts/python.exe tests/services_media_smoke.py build/ci-checks/services
           if ($LASTEXITCODE -ne 0) { throw 'Service scrolling and media UI failed' }
+          .venv-ci/Scripts/python.exe tests/matching_ui_smoke.py build/ci-checks/matching
+          if ($LASTEXITCODE -ne 0) { throw 'Answer matching UI failed' }
           .venv-ci/Scripts/python.exe tests/audit_ui_smoke.py
           if ($LASTEXITCODE -ne 0) { throw 'Audit UI regression failed' }
           .venv-ci/Scripts/python.exe tests/activity_ui_smoke.py build/ci-checks/activity
           if ($LASTEXITCODE -ne 0) { throw 'Activity UI regression failed' }
+          foreach ($workbenchScale in @('1', '1.25', '1.5', '2')) {
+            $env:QT_SCALE_FACTOR = $workbenchScale
+            .venv-ci/Scripts/python.exe tests/workbench_ui_smoke.py "build/ci-checks/workbench-$workbenchScale"
+            if ($LASTEXITCODE -ne 0) { throw "Workbench UI regression failed at scale $workbenchScale" }
+          }
+          $env:QT_SCALE_FACTOR = '1'
           $env:QT_QPA_PLATFORM = 'offscreen'
           $env:QSG_RHI_BACKEND = 'software'
           .venv-ci/Scripts/python.exe run.py --smoke-test build/ci-checks/source
           if ($LASTEXITCODE -ne 0) { throw 'Source worker integration failed' }
           .venv-ci/Scripts/python.exe tests/performance_smoke.py --tasks 10000 --events 1000 --questions 1000 --rounds 3 --max-round-seconds 20 --max-heartbeat-p95-ms 500 --output build/ci-checks/performance.json
           if ($LASTEXITCODE -ne 0) { throw 'Performance budget exceeded' }
+          .venv-ci/Scripts/python.exe tests/performance_smoke.py --attention --tasks 10000 --events 1000 --questions 2500 --rounds 3 --max-round-seconds 20 --max-heartbeat-p95-ms 500 --output build/ci-checks/performance-attention.json
+          if ($LASTEXITCODE -ne 0) { throw 'Pending-items performance budget exceeded' }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

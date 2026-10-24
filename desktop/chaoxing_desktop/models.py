@@ -89,6 +89,7 @@ class LogModel(QAbstractListModel):
         self.pending = deque()
         self.characters = 0
         self.pending_characters = 0
+        self.evicted = 0
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
         self.timer.setInterval(100)
@@ -113,6 +114,7 @@ class LogModel(QAbstractListModel):
         self.pending_characters += len(text)
         while len(self.pending) > self.MAX_ROWS or self.pending_characters > self.MAX_CHARS:
             self.pending_characters -= len(self.pending.popleft())
+            self.evicted += 1
         if not self.timer.isActive():
             self.timer.start()
 
@@ -128,6 +130,7 @@ class LogModel(QAbstractListModel):
             remaining_chars -= len(self.rows[removed])
             removed += 1
         if removed:
+            self.evicted += removed
             self.beginRemoveRows(QModelIndex(), 0, removed - 1)
             for _ in range(removed):
                 self.rows.popleft()
@@ -156,6 +159,7 @@ class LogModel(QAbstractListModel):
         self.rows.clear()
         self.pending.clear()
         self.characters = self.pending_characters = 0
+        self.evicted = 0
         self.endResetModel()
 
 

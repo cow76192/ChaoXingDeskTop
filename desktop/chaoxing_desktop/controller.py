@@ -138,6 +138,19 @@ class Controller(QObject):
                     and (event['level'] != 'fixed_good' or event['content'] == '好'))
         if kind == 'control':
             return type(event.get('paused')) is bool
+        if kind == 'verification':
+            return (type(event.get('confirmed')) is bool and
+                    all(isinstance(event.get(k), str) and len(event[k]) <= 2000 for k in ('id', 'checked_at', 'reason')))
+        if kind == 'record_verification':
+            return (event.get('kind') in ('discussion', 'activity') and
+                    event.get('participation') in ('existing', 'absent', 'unknown') and
+                    event.get('task_status') in ('confirmed', 'pending') and
+                    all(isinstance(event.get(k), str) and len(event[k]) <= 2000
+                        for k in ('id', 'task_id', 'checked_at', 'reason')))
+        if kind == 'ai_usage':
+            return (all(type(event.get(k)) is int and 0 <= event[k] <= 10**15
+                        for k in ('requests', 'limit', 'known', 'unknown', 'tokens'))
+                    and event['known'] + event['unknown'] == event['requests'])
         if kind == "task":
             return isinstance(event.get("id"), str) and isinstance(event.get("status"), str)
         if kind == "done":

@@ -154,7 +154,23 @@ ColumnLayout {
                 Text { text: "已选择 " + bridge.summary.selectedCount + " 门课程"; color: "white"; font.pixelSize: 16; font.bold: true; Layout.fillWidth: true }
                 Text { text: bridge.summary.hiddenCount ? "包含 " + bridge.summary.hiddenCount + " 门被搜索隐藏的已选课程" : bridge.summary.demo ? "演示过程不会连接超星" : "按当前学习与答案策略处理所选课程"; color: "#b8c8df"; font.pixelSize: 12; Layout.fillWidth: true }
             }
+            ActionButton { objectName: "strategy_button"; text: "查看本轮策略"; onClicked: { strategy.confirming = false; strategy.content = bridge.strategySummary; strategy.open() } }
             ActionButton { text: "开始所选课程"; tone: "execute"; glyph: "play"; enabled: bridge.summary.selectedCount > 0 && !bridge.summary.busy; onClicked: bridge.startTasks() }
         }
+    }
+    Connections {
+        target: bridge
+        function onStartConfirmationRequested(text) { strategy.confirming = true; strategy.content = text; strategy.open() }
+    }
+    ReadOnlyDialog {
+        id: strategy; objectName: "strategyDialog"; parent: Overlay.overlay; anchors.centerIn: parent
+        property bool confirming: false
+        property string content: ""
+        title: confirming ? "确认本轮提交策略" : "本轮策略摘要"
+        modal: true; width: Math.min(620, page.width); height: Math.min(520, page.height)
+        standardButtons: confirming ? Dialog.Ok | Dialog.Cancel : Dialog.Close
+        bodyText: strategy.content
+        onAccepted: if (confirming) bridge.confirmStartTasks()
+        onRejected: bridge.cancelStartTasks()
     }
 }

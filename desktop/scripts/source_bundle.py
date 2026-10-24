@@ -6,7 +6,7 @@ import zipfile
 def source_files(desktop: Path):
     root_files = (
         ".gitignore", "run.py", "ChaoxingDesktop.spec", "README.md", "LICENSE",
-        "THIRD_PARTY_NOTICES.md", "requirements.txt", "requirements-build.txt",
+        "THIRD_PARTY_NOTICES.md", "UPGRADE_ACCEPTANCE.md", "REVIEWED_SUBMISSION_CONTRACT.md", "requirements.txt", "requirements-build.txt",
         "requirements-lock.txt",
         "scripts/retired-runtime-0.3.5.txt",
     )
@@ -23,6 +23,8 @@ def source_files(desktop: Path):
                     and "__pycache__" not in path.parts and path.suffix in extensions):
                 files.append(path)
     files.append(desktop / "tests/fixtures/ocs_protocol_cases.json")
+    files.append(desktop / "tests/fixtures/verification_cases.json")
+    files.append(desktop / "tests/fixtures/README.md")
     files.extend(desktop / relative for relative in (
         "vendor/chaoxing/LICENSE", "vendor/chaoxing/resource/README.md",
         "vendor/chaoxing/resource/font_map_table.json",

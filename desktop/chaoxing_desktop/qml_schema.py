@@ -2,9 +2,10 @@
 from .config import BANK_REVIEW_POLICIES, DISCUSSION_LEVELS, ACTIVITY_CHOICES, ACTIVITY_TEXTS
 
 
-def field(title, section, key, kind="text", low=0, high=100, choices=(), hint=""):
+def field(title, section, key, kind="text", low=0, high=100, choices=(), hint="", depends=None):
     return dict(title=title, section=section, key=key, kind=kind, low=low, high=high,
-                choices=[dict(label=label, value=value) for label, value in choices], hint=hint)
+                choices=[dict(label=label, value=value) for label, value in choices], hint=hint,
+                depends=depends or {})
 
 
 def group(title, description, fields):
@@ -35,13 +36,16 @@ SCHEMA = {
             field("视频倍速", "common", "speed", "number", 1, 2, hint="1–2 倍"),
             field("同时处理的章节数", "common", "jobs", "integer", 1, 16),
             field("未开放章节", "common", "notopen_action", "choice", choices=[("重试（最多 5 轮）", "retry"), ("询问后跳过或停止", "ask"), ("直接跳过", "continue")]),
-            field("重试间隔 / 秒", "common", "retry_interval", "number", .1, 3600),
+            field("重试间隔 / 秒", "common", "retry_interval", "number", .1, 3600,
+                  depends=dict(section='common', key='notopen_action', value='retry', reason='选择重试未开放章节后生效')),
         ]),
         group("章节检测与学习次数", "仅允许一次作答的课程请保持重做关闭。", [
             field("答错后允许重做", "common", "work_redo_enabled", "bool"),
-            field("最多重做次数", "common", "work_max_retries", "integer", 0, 20),
+            field("最多重做次数", "common", "work_max_retries", "integer", 0, 20,
+                  depends=dict(section='common', key='work_redo_enabled', value='true', reason='开启答错后允许重做后生效')),
             field("任务结束后追加学习次数", "common", "add_learning_count", "bool"),
-            field("目标总次数", "common", "target_count", "integer", 1, 100000),
+            field("目标总次数", "common", "target_count", "integer", 1, 100000,
+                  depends=dict(section='common', key='add_learning_count', value='true', reason='开启追加学习次数后生效')),
         ]),
     ],
     "ai": [group("AI 补全", "题库查询后，只补全仍未解决的题目。", [
@@ -52,6 +56,10 @@ SCHEMA = {
         field("模型名称", "ai", "model"),
         field("模型支持图片识别", "ai", "vision", "bool", hint="关闭后，图片题留待人工处理。"),
         field("首次使用前检查连接", "ai", "check_connection", "bool"),
+        field("每次操作 AI 请求硬上限", "ai", "request_limit", "integer", 0, 100000,
+              hint="0 表示不设整轮上限；课程运行共享测验、讨论和活动预算，连接检查和预览分别计为一次操作。重试也计数。"),
+        field("服务返回 token 累计告警", "ai", "token_warning", "integer", 0, 1000000000,
+              hint="0 关闭。仅按服务实际 usage 告警，不阻断请求；用量未知的请求无法纳入总量，不等于账单。"),
     ])],
     "answers": [group("答案处理策略", "题库 → AI → 人工 → 随机，按固定顺序补全。", [
         field("题库答案审核", "matching", "bank_review_policy", "choice", choices=BANK_REVIEW_POLICIES,
@@ -127,8 +135,10 @@ SCHEMA['bank_yanxi'][0]['fields'].extend([
     field('每题最多额外查询次数', 'question_bank', 'yanxi_variant_limit', 'integer', 0, 2),
 ])
 
-SCHEMA['advanced'][0]['fields'].append(field('每题每服务请求预算', 'question_bank', 'request_budget', 'integer', 1, 100,
-                                           hint='包括重试与格式重查；同轮同一章节题目重复处理共享预算。'))
+SCHEMA['advanced'].insert(0, group('请求控制', '单题限制与 AI 整轮上限分别生效，达到预算后留待处理。', [
+    field('每题每服务请求预算', 'question_bank', 'request_budget', 'integer', 1, 100,
+          hint='包括重试与格式重查；同轮同一章节题目重复处理共享预算。AI 整轮上限在 AI 设置中。'),
+]))
 SCHEMA['bank_declarative'] = [group('声明式 JSON 题库', '仅支持字段模板和响应路径，不执行脚本。', [
     field('JSON 题库定义', 'question_bank', 'declarative_definition', 'multiline', hint='可导入或导出不含 Token 的模板'),
     field('最小请求间隔 / 秒', 'question_bank', 'declarative_min_interval', 'number', 0, 3600),

@@ -13,6 +13,41 @@ KEYS = set(TEMPLATE)
 ENV_KEYS = {'title', 'options', 'type', 'token'}
 
 
+def preview_definition(text):
+    """Describe routing/mapping without exposing literal header or data values."""
+    if len(text.encode('utf-8')) > 65536:
+        raise ValueError('题库定义超过 64 KiB')
+    raw = json.loads(text)
+    if not isinstance(raw, dict):
+        raise ValueError('题库定义必须为 JSON 对象')
+    rejected = sorted(set(raw) - KEYS)
+    try:
+        definition = validate_definition(text)
+        error = ''
+    except (ValueError, TypeError, AttributeError) as exc:
+        definition, error = None, str(exc)
+    address = raw.get('url', '')
+    try:
+        domain = urlparse(address).hostname or '无法识别'
+    except (ValueError, TypeError, AttributeError):
+        domain = '无法识别'
+    lines = ['仅导入配置，不联网。Token 仍需单独填写。', '目标域名：' + domain,
+             '方法：' + str(raw.get('method', '未指定'))[:30],
+             '请求映射（固定值不展示）：']
+    for kind in ('headers', 'data'):
+        items = raw.get(kind, {})
+        if isinstance(items, dict):
+            for key, value in list(items.items())[:24]:
+                variables = re.findall(r'\$\{(title|options|type|token)\}', value) if isinstance(value, str) else []
+                lines.append(kind + '[' + str(key)[:80] + '] ← ' + (', '.join(variables) or '固定值 / 非法结构'))
+    lines.append('响应映射：')
+    for key in ('results_path', 'answer_path', 'title_path', 'options_path', 'type_map'):
+        lines.append(key + ' ← ' + json.dumps(raw.get(key, ''), ensure_ascii=False)[:400])
+    lines.append('拒绝的脚本／扩展字段：' + (', '.join(k[:80] for k in rejected[:24]) or '无'))
+    lines.append('校验：' + (error if error else '通过；确认后替换当前声明式定义。'))
+    return definition, '\n'.join(lines)
+
+
 def path_value(value, path):
     if not path:
         return value

@@ -1,6 +1,8 @@
 # 来源与许可
 
-桌面版：ChaoxingDesktop 0.3.9，GPL-3.0。完整许可见 LICENSE。
+桌面版：ChaoxingDesktop 0.4.0，GPL-3.0。完整许可见 LICENSE。
+
+0.4.0 独立实现待处理中心、只读核验、启动策略摘要、排障导出、运行摘要、DPAPI AI 档案、AI 用量控制和本地人工副本，改善 QML 界面与容量提示；删除无调用的旧副本答案查找函数。未新增第三方源码或运行依赖，vendor 协议源码未变。副本没有独立提交入口。
 
 0.3.9 新增独立实现的投票／问卷策略、逐题验证、草稿与提交意图存储、QML 设置及记录界面；平台适配改动位于 api/activity.py、api/decode.py 与 api/base.py。协议与支持边界见 [ACTIVITY_PROTOCOL.md](vendor/chaoxing/api/ACTIVITY_PROTOCOL.md)。删除无调用方的限速副本与字体原始 HTML 成员，未新增运行依赖。
 

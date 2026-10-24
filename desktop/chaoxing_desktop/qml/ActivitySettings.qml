@@ -37,7 +37,7 @@ ScrollView {
         Panel {
             Layout.fillWidth: true; Layout.alignment: Qt.AlignTop
             title: "混合问卷示例预览"
-            description: "内置单选、多选与文本样例。AI 策略会请求已配置服务，可能消耗额度；随机 + 固定好完全本地。预览不读取课程、不提交、不写活动记录。"
+            description: "AI 策略将发送下方示例题干与内置选项到 " + bridge.aiDestination + "，可能消耗额度；随机 + 固定好完全本地。预览不读取课程、不提交、不写活动记录。"
             Label { text: "示例文本题干"; color: "#34435a" }
             ScrollView {
                 Layout.fillWidth: true; Layout.preferredHeight: 75; clip: true

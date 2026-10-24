@@ -14,6 +14,7 @@ from .providers import PROVIDER_SPECS
 from .text import plain_text
 from .http import service_request
 from .matching import AnswerMemory, answer_body, canonical, match_choices, result_options, title_similarity
+from .ai_usage import AIUsage, AIBudgetExceeded
 
 
 def question_images(question):
@@ -41,6 +42,15 @@ class AIClient:
         self.config = config
         self.last_request = 0.0
         self.feedback = None
+        self.usage = AIUsage(config.get('request_limit', '0'), token_warning=config.get('token_warning', '0'))
+
+    def attach_channel(self, channel):
+        self.control = control_of(channel)
+        usage = vars(channel).get('ai_usage')
+        if usage is None:
+            usage = AIUsage(self.config.get('request_limit', '0'), channel.send, self.config.get('token_warning', '0'))
+            channel.ai_usage = usage
+        self.usage = usage
 
     def messages(self, question):
         content = [{"type": "text", "text": f"类型：{question.get('type')}\n题目：{plain_text(question.get('title', ''))}\n选项：{plain_text(question.get('options', ''))}"}]
@@ -66,6 +76,10 @@ class AIClient:
             checkpoint(self)
             if vars(self).get("budget_check"):
                 self.budget_check()
+            try:
+                self.usage.reserve()
+            except AIBudgetExceeded as exc:
+                raise AIError('budget_exhausted', str(exc)) from None
             self.last_request = time.monotonic()
             self.last_metrics['requests'] += 1
             self.last_metrics['retries'] += bool(attempt)
@@ -76,7 +90,9 @@ class AIClient:
                                          proxies={"http": c["http_proxy"], "https": c["http_proxy"]} if c["http_proxy"] else None)
                 response.raise_for_status()
                 try:
-                    content = response.json()["choices"][0]["message"]["content"]
+                    body = response.json()
+                    self.usage.record(body)
+                    content = body["choices"][0]["message"]["content"]
                     if not isinstance(content, str):
                         raise ValueError
                     return content
@@ -139,6 +155,8 @@ class AnswerRouter:
         self.unavailable = {}
         if self.ai:
             self.ai.control = self.control
+            if isinstance(self.ai, AIClient):
+                self.ai.attach_channel(channel)
 
     def get_submit_params(self):
         return "" if self.SUBMIT else "1"
