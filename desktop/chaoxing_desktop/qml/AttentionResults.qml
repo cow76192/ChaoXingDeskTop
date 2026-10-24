@@ -47,7 +47,6 @@ ColumnLayout {
     ReadOnlyDialog {
         id: detail; objectName: "attentionDetail"; parent: Overlay.overlay; anchors.centerIn: parent
         title: "待处理原因与下一步"; modal: true; width: Math.min(680, pane.width); height: Math.min(500, parent.height - 60)
-        standardButtons: Dialog.Close
         onClosed: issues.forceActiveFocus()
         bodyText: (pane.selected.course || "") + "\n" + (pane.selected.title || "") + "\n\n状态：" + (pane.selected.status || "") + "\n原因：" + (pane.selected.reason || "") + "\n\n下一步：" + (pane.selected.next || "")
     }

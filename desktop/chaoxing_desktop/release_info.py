@@ -1,7 +1,7 @@
 """Offline release information and fixed, user-opened public destinations."""
 import platform
 import sys
-from . import __version__
+from . import __version__, __revision__
 
 RELEASE_URLS = dict(latest='https://github.com/mikubob/ChaoXingDeskTop/releases/latest',
                     notes='https://github.com/mikubob/ChaoXingDeskTop/releases')
@@ -9,6 +9,7 @@ RELEASE_URLS = dict(latest='https://github.com/mikubob/ChaoXingDeskTop/releases/
 
 def verification_info():
     return '\n'.join(['ChaoXingDesktop ' + __version__,
+                      '发行修订：' + __revision__,
                       '运行方式：' + ('冻结程序' if getattr(sys, 'frozen', False) else '源码开发快照（未发行改动可能尚未包含在版本号中）'),
                       '系统：' + platform.system() + ' ' + platform.release() + ' / ' + platform.machine(),
                       'Python：' + platform.python_version(),

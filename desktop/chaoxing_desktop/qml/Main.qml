@@ -33,15 +33,16 @@ ApplicationWindow {
         close.accepted = discardedClose || bridge.close()
         if (!close.accepted) closeFailure.open()
     }
-    Dialog {
-        id: closeFailure; parent: Overlay.overlay; anchors.centerIn: parent
-        title: "设置未能保存"; modal: true; width: Math.min(520, window.width - 60); height: 220
-        contentItem: Label { text: "可返回修正设置，或放弃本次设置修改并停止后台、退出。磁盘上的原设置会保留。"; wrapMode: Text.Wrap }
-        footer: DialogButtonBox {
-            Button { text: "返回修正"; DialogButtonBox.buttonRole: DialogButtonBox.RejectRole }
-            Button { text: "放弃修改并退出"; DialogButtonBox.buttonRole: DialogButtonBox.DestructiveRole; onClicked: { if (bridge.discardAndClose()) { window.discardedClose = true; window.close() } } }
-            onRejected: closeFailure.close()
+    ActionDialog {
+        id: closeFailure; objectName: "closeFailureDialog"; parent: Overlay.overlay; anchors.centerIn: parent
+        title: "退出前保存未完成"; modal: true; width: Math.min(550, window.width - 60); height: Math.min(370, window.height - 50)
+        primaryText: "放弃修改并退出"; primaryTone: "danger"; cancelText: "返回修正"; autoAccept: false
+        contentItem: ColumnLayout {
+            NoticeBanner { message: bridge.summary.message; tone: "danger"; Layout.fillWidth: true }
+            Label { text: "返回修正后可再次保存。放弃会停止后台并退出，磁盘上的原设置保留。"; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            Item { Layout.fillHeight: true }
         }
+        onPrimaryTriggered: if (bridge.discardAndClose()) { window.discardedClose = true; window.close() }
     }
     Connections { target: bridge; function onPageRequested(index) { window.pageIndex = index } }
     RowLayout {
@@ -111,11 +112,7 @@ ApplicationWindow {
                 ActionButton { text: "保存设置"; tone: "save"; glyph: "save"; enabled: !bridge.summary.busy; onClicked: bridge.save() }
                 }
             }
-            Rectangle {
-                Layout.fillWidth: true; Layout.preferredHeight: feedback.implicitHeight + 24; radius: 8
-                color: bridge.summary.tone === "danger" ? "#ffecec" : bridge.summary.tone === "warning" ? "#fff3df" : bridge.summary.tone === "success" ? "#e8f4ed" : "#edf2fb"
-                Text { id: feedback; anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; margins: 14 } text: bridge.summary.message; color: bridge.summary.tone === "danger" ? "#b42323" : bridge.summary.tone === "warning" ? "#995a0d" : bridge.summary.tone === "success" ? "#187044" : "#496080"; font.pixelSize: 12; wrapMode: Text.Wrap; textFormat: Text.PlainText }
-            }
+            NoticeBanner { objectName: "globalNotice"; Layout.fillWidth: true; message: bridge.summary.message; tone: bridge.summary.tone; maximumHeight: 100 }
             StackLayout {
                 Layout.fillWidth: true; Layout.fillHeight: true; currentIndex: window.pageIndex
                 CoursesPage {}
@@ -139,12 +136,17 @@ ApplicationWindow {
         id: releaseInfo; objectName: "releaseInfoDialog"
         title: "版本、发行说明与校验信息"; width: Math.min(720, window.width - 50); height: Math.min(610, window.height - 50)
         bodyText: bridge.releaseInfo
-        footer: RowLayout {
+        onOpened: bridge.clearUiFeedback("release")
+        footer: ColumnLayout {
+            OperationNotice { objectName: "releaseNotice"; scope: "release"; Layout.fillWidth: true; Layout.leftMargin: 18; Layout.rightMargin: 18 }
+            RowLayout {
+            Layout.fillWidth: true; Layout.margins: 14
             ActionButton { objectName: "release_latest"; text: "检查版本网页…"; onClicked: bridge.releaseAction("latest") }
             ActionButton { text: "发行说明…"; onClicked: bridge.releaseAction("notes") }
             ActionButton { objectName: "copy_verification_info"; text: "复制校验说明"; onClicked: bridge.releaseAction("copy") }
             Item { Layout.fillWidth: true }
             ActionButton { text: "关闭"; onClicked: releaseInfo.close() }
+            }
         }
     }
 }

@@ -79,14 +79,15 @@ ColumnLayout {
         }
     }
     }
-    Dialog {
-        id: deleteAccountDialog
+    ActionDialog {
+        id: deleteAccountDialog; objectName: "deleteAccountDialog"
         parent: Overlay.overlay
         anchors.centerIn: parent
         modal: true
         title: "删除当前账号？"
-        standardButtons: Dialog.Ok | Dialog.Cancel
-        Label { text: "将删除该账号及本机保存的 Cookie。\n其他账号不会受影响，再次使用需重新登录。"; wrapMode: Text.Wrap }
+        width: Math.min(550, page.width); height: 280
+        primaryText: "删除此账号"; primaryTone: "danger"
+        contentItem: NoticeBanner { tone: "warning"; message: "将删除「" + accounts.currentText + "」及其本机 Cookie。其他账号不受影响，再次使用需重新登录。" }
         onAccepted: { bridge.removeAccount(); page.accountOpen = true }
     }
     RowLayout {
@@ -168,7 +169,9 @@ ColumnLayout {
         property string content: ""
         title: confirming ? "确认本轮提交策略" : "本轮策略摘要"
         modal: true; width: Math.min(620, page.width); height: Math.min(520, page.height)
-        standardButtons: confirming ? Dialog.Ok | Dialog.Cancel : Dialog.Close
+        primaryText: confirming ? "按此策略开始" : ""; primaryTone: "execute"; cancelText: confirming ? "返回检查" : "关闭"
+        noticeMessage: confirming ? "本轮包含自动提交策略。请核对以下账号、课程和独立提交开关后再开始。" : ""
+        noticeTone: "warning"
         bodyText: strategy.content
         onAccepted: if (confirming) bridge.confirmStartTasks()
         onRejected: bridge.cancelStartTasks()

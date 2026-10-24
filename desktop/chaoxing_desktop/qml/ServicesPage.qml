@@ -104,7 +104,7 @@ ColumnLayout {
                             RowLayout {
                                 visible: parent.settingsOpen
                                 Layout.fillWidth: true
-                                ActionButton { text: "真实连接检查…"; enabled: !bridge.summary.busy; onClicked: { bankConfirm.providerKey = modelData.key; bankConfirm.open() } }
+                                ActionButton { text: "真实连接检查…"; tone: "test"; subtle: true; enabled: !bridge.summary.busy; onClicked: { bankConfirm.providerKey = modelData.key; bankConfirm.providerTitle = modelData.title; bankConfirm.open() } }
                                 ActionButton { visible: modelData.key === "TikuDeclarative"; text: "导入 JSON"; enabled: !bridge.summary.busy; onClicked: bridge.definitionAction("import") }
                                 ActionButton { visible: modelData.key === "TikuDeclarative"; text: "导出模板"; enabled: !bridge.summary.busy; onClicked: bridge.definitionAction("export") }
                             }
@@ -117,7 +117,7 @@ ColumnLayout {
                     visible: page.serviceArea === "ai" || page.width > 880
                     Layout.fillWidth: true; Layout.alignment: Qt.AlignTop
                     title: "AI 补全"; description: "补全未解决的题目；需要服务与模型支持图片识别。"
-                    ActionButton { objectName: "ai_profiles_button"; text: "命名 AI 档案…"; enabled: !bridge.summary.busy; onClicked: { profiles.rows = bridge.listAiProfiles(); profiles.open() } }
+                    ActionButton { objectName: "ai_profiles_button"; text: "命名 AI 档案…"; enabled: !bridge.summary.busy; onClicked: { bridge.clearUiFeedback("profiles"); profiles.rows = bridge.listAiProfiles(); profiles.open() } }
                     Repeater { model: bridge.schema.ai[0].fields; Field { required property var modelData; spec: modelData } }
                     ActionButton { text: "测试 AI 连接…"; tone: "test"; glyph: "test"; enabled: !bridge.summary.busy; onClicked: aiConfirm.open() }
                     Text { text: bridge.serviceHealth.ai; color: "#627086"; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true }
@@ -132,46 +132,63 @@ ColumnLayout {
         DiscussionSettings {}
         ActivitySettings {}
     }
-    Dialog {
-        id: bankConfirm; property string providerKey: ""
-        title: "真实服务连接检查"; height: 200; modal: true; anchors.centerIn: parent; width: Math.min(page.width - 40, 520)
+    ActionDialog {
+        id: bankConfirm; objectName: "bankConfirmDialog"; property string providerKey: ""; property string providerTitle: ""
+        title: "真实服务连接检查"; height: 280; modal: true; anchors.centerIn: parent; width: Math.min(page.width - 40, 520)
         background: Rectangle { color: "white"; radius: 12; border.color: "#dbe3ef" }
-        standardButtons: Dialog.Ok | Dialog.Cancel
-        contentItem: Text { text: "将发送一道最小测试题，可能消耗服务额度。检查不启动课程，也不保证后续命中或答案正确。"; wrapMode: Text.Wrap; color: "#34435a" }
+        primaryText: "发送测试题"; primaryTone: "test"
+        contentItem: NoticeBanner { tone: "warning"; message: "检查服务：" + bankConfirm.providerTitle + "。将发送一道最小测试题，可能消耗服务额度。不会启动课程；连接可用不保证命中或答案正确。" }
         onAccepted: bridge.checkBank(providerKey)
     }
-    Dialog {
-        id: aiConfirm; parent: Overlay.overlay; anchors.centerIn: parent; modal: true
-        title: "主动测试 AI 服务"; width: Math.min(page.width - 40, 520); height: 240
-        standardButtons: Dialog.Ok | Dialog.Cancel
-        contentItem: Label { text: "发送目标：" + bridge.aiDestination + "\n将发送“回复 OK”，可能消耗额度。不会读取课程、发送账号信息或提交答案。连接可用不代表答案正确或图片能力已验证。"; wrapMode: Text.Wrap }
+    ActionDialog {
+        id: aiConfirm; objectName: "aiConfirmDialog"; parent: Overlay.overlay; anchors.centerIn: parent; modal: true
+        title: "主动测试 AI 服务"; width: Math.min(page.width - 40, 520); height: 320
+        primaryText: "发送测试请求"; primaryTone: "test"
+        contentItem: NoticeBanner { tone: "warning"; message: "发送目标：" + bridge.aiDestination + "\n将发送“回复 OK”，可能消耗额度。不会读取课程、发送账号信息或提交答案。连接可用不代表答案正确或图片能力已验证。" }
         onAccepted: bridge.checkAi()
     }
-    Basic.Dialog {
+    ActionDialog {
         id: profiles; objectName: "aiProfilesDialog"; property var rows: []
         parent: Overlay.overlay; anchors.centerIn: parent; modal: true
-        title: "命名 AI 档案（本机加密）"; width: Math.min(660, page.width); height: 450
+        title: "命名 AI 档案（本机加密）"; width: Math.min(660, page.width); height: Math.min(620, parent.height - 50)
         padding: 18
         background: Rectangle { color: "white"; radius: 12; border.color: "#cdd7e6" }
-        standardButtons: Dialog.Close
+        cancelText: "关闭"
         contentItem: ColumnLayout {
             Label { text: "现有 AI 配置继续可用，可保存为“默认档案”。档案含当前服务地址、模型、视觉声明、请求限制与独立凭据，均用 DPAPI 加密。最多 20 项，仅显式切换，不自动联网或切换提供商。视觉能力仍须主动测试。"; wrapMode: Text.Wrap; Layout.fillWidth: true }
             Basic.TextField { id: profileName; objectName: "aiProfileName"; text: "默认档案"; maximumLength: 40; Layout.fillWidth: true; Accessible.name: "AI 档案名称" }
-            ActionButton { objectName: "saveAiProfile"; text: "保存当前设置／覆盖同名档案"; enabled: !bridge.summary.busy; onClicked: { bridge.aiProfileAction("save", profileName.text); profiles.rows = bridge.listAiProfiles() } }
-            ChoiceBox { id: profileChoice; objectName: "aiProfileChoice"; model: profiles.rows; textRole: "name"; valueRole: "id"; Layout.fillWidth: true; Accessible.name: "选择 AI 档案" }
+            ActionButton { objectName: "saveAiProfile"; text: "保存当前设置／覆盖同名档案"; tone: "save"; enabled: !bridge.summary.busy; onClicked: { bridge.aiProfileAction("save", profileName.text); profiles.rows = bridge.listAiProfiles() } }
+            ChoiceBox { id: profileChoice; objectName: "aiProfileChoice"; enabled: profiles.rows.length > 0; model: profiles.rows; textRole: "name"; valueRole: "id"; Layout.fillWidth: true; Accessible.name: "选择 AI 档案" }
             RowLayout {
-                ActionButton { objectName: "loadAiProfile"; text: "切换到所选档案"; enabled: !bridge.summary.busy && profiles.rows.length > 0; onClicked: { bridge.aiProfileAction("load", profileChoice.currentValue || ""); profiles.close() } }
-                ActionButton { objectName: "deleteAiProfile"; text: "删除所选档案"; enabled: !bridge.summary.busy && profiles.rows.length > 0; onClicked: { bridge.aiProfileAction("delete", profileChoice.currentValue || ""); profiles.rows = bridge.listAiProfiles() } }
+                ActionButton { objectName: "loadAiProfile"; text: "切换到所选档案"; tone: "connect"; enabled: !bridge.summary.busy && profiles.rows.length > 0; onClicked: bridge.aiProfileAction("load", profileChoice.currentValue || "") }
+                ActionButton { objectName: "deleteAiProfile"; text: "删除所选档案…"; tone: "danger"; subtle: true; enabled: !bridge.summary.busy && profiles.rows.length > 0; onClicked: { bridge.clearUiFeedback("profiles"); deleteProfile.profileId = profileChoice.currentValue || ""; deleteProfile.profileName = profileChoice.currentText; deleteProfile.open() } }
             }
+            NoticeBanner { visible: !profiles.rows.length && (bridge.uiFeedback.profiles || {}).tone !== "danger"; message: "暂无已保存的 AI 档案。填写名称后，可将当前配置保存为一个档案。"; Layout.fillWidth: true }
+            OperationNotice { objectName: "profilesNotice"; scope: "profiles"; Layout.fillWidth: true }
             Label { text: "删除档案后保留当前已加载设置副本，不自动回退到其他服务。旧 INI 的当前配置不被替换，完整 INI 导出不包含这些加密档案；备份需同时保留 ai_profiles.json。"; wrapMode: Text.Wrap; Layout.fillWidth: true; color: "#627086" }
+            Item { Layout.fillHeight: true }
         }
+    }
+    ActionDialog {
+        id: deleteProfile; objectName: "deleteAiProfileDialog"
+        property string profileId: ""; property string profileName: ""
+        title: "删除 AI 档案？"; width: Math.min(550, page.width); height: Math.min(340, parent.height - 50)
+        primaryText: "删除此档案"; primaryTone: "danger"; autoAccept: false
+        contentItem: ColumnLayout {
+            NoticeBanner { tone: "warning"; message: "将删除「" + deleteProfile.profileName + "」的本机加密档案，无法撤销。当前已加载设置保持，不会自动切换提供商。"; Layout.fillWidth: true }
+            OperationNotice { scope: "profiles"; Layout.fillWidth: true }
+            Item { Layout.fillHeight: true }
+        }
+        onPrimaryTriggered: if (bridge.aiProfileAction("delete", profileId)) { profiles.rows = bridge.listAiProfiles(); accept() }
     }
     ReadOnlyDialog {
         id: definitionPreview; objectName: "definitionPreview"
         property bool canImport: false
         title: canImport ? "导入前检查目标与映射" : "定义被拒绝（未导入）"
         width: Math.min(700, page.width); height: Math.min(560, parent.height - 50)
-        standardButtons: canImport ? Dialog.Ok | Dialog.Cancel : Dialog.Cancel
+        primaryText: canImport ? "导入此定义" : ""; cancelText: canImport ? "取消" : "关闭"
+        noticeMessage: canImport ? "请核对目标与映射，确认后替换当前定义；不会执行脚本或自动测试服务。" : "定义校验失败，尚未导入。请按下方原因修正文件后重试。"
+        noticeTone: canImport ? "warning" : "danger"
         onAccepted: bridge.finishDefinitionImport(true)
         onRejected: bridge.finishDefinitionImport(false)
     }

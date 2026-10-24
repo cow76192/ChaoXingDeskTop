@@ -123,7 +123,7 @@ Basic.Dialog {
                 }
             }
         }
-        Text { text: dialog.hint || (bridge.input.random ? "跳过后，选择题和判断题将按随机补全设置处理。" : "跳过后，此题保持待处理。"); visible: bridge.input.kind !== "choice"; color: "#a35f12"; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true }
+        NoticeBanner { message: dialog.hint || (bridge.input.random ? "跳过后，选择题和判断题将按随机补全设置处理。" : "跳过后，此题保持待处理。"); visible: bridge.input.kind !== "choice"; tone: dialog.hint ? "danger" : "warning"; maximumHeight: 100; Layout.fillWidth: true }
         RowLayout {
             Layout.fillWidth: true
             ActionButton { objectName: "manual_skip"; visible: bridge.input.kind !== "choice"; text: "跳过此题"; tone: "warning"; subtle: true; onClicked: bridge.reply("", false) }

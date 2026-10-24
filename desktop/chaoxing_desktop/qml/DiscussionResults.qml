@@ -58,12 +58,14 @@ ColumnLayout {
         }
         Text { visible: results.count === 0; anchors.centerIn: parent; text: "暂无讨论记录；可先在题库与 AI → 讨论任务中预览"; color: "#627086"; font.pixelSize: 12 }
     }
-    Dialog {
+    ActionDialog {
         id: detail; objectName: "discussionDetail"; parent: Overlay.overlay; anchors.centerIn: parent
+        cancelText: "关闭"
         title: "讨论草稿与处理详情"; modal: true
         width: Math.min(760, pane.Window.width - 60); height: Math.min(580, pane.Window.height - 100)
-        standardButtons: Dialog.Close
+        onOpened: bridge.clearUiFeedback("record")
         contentItem: ColumnLayout {
+            OperationNotice { scope: "record"; Layout.fillWidth: true }
             ScrollView {
                 Layout.fillWidth: true; Layout.fillHeight: true; clip: true
                 TextArea {
@@ -75,7 +77,7 @@ ColumnLayout {
                 }
             }
             ActionButton { text: "复制讨论正文"; enabled: !!pane.selected.content; onClicked: bridge.copyDiscussion(pane.selectedId) }
-            ActionButton { objectName: "editDiscussionCopy"; text: "编辑本地副本…"; enabled: pane.selected.stage === "draft" && !bridge.summary.busy; onClicked: { detail.close(); bridge.openDraftCopy("discussion", pane.selectedId) } }
+            ActionButton { objectName: "editDiscussionCopy"; text: "编辑本地副本…"; tone: "connect"; enabled: pane.selected.stage === "draft" && !bridge.summary.busy; onClicked: { detail.close(); bridge.openDraftCopy("discussion", pane.selectedId) } }
         }
     }
 }

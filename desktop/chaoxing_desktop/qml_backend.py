@@ -51,6 +51,7 @@ class Backend(QObject):
         self.startup_error = None
         self.message = "准备就绪。连接账户，或通过离线演示体验学习工作台。"
         self.tone = "info"
+        self._ui_feedback = {}
         self.save_state = "设置已同步"
         settings = data_dir() / "settings.ini"
         try:
@@ -112,6 +113,7 @@ class Backend(QObject):
         self._draft_account = ''
         self._draft_feedback = ''
         self._draft_saved = False
+        self._draft_dirty = False
         self._draft_input_errors = {}
         self._draft_sources_uncertain = False
         self._run_completed = False
@@ -182,12 +184,12 @@ class Backend(QObject):
         if action == 'copy':
             from PySide6.QtGui import QGuiApplication
             QGuiApplication.clipboard().setText(verification_info())
-            self.notify('版本与校验说明已复制；不含账号、凭据或数据目录。')
+            self.feedback('release', '版本与校验说明已复制；不含账号、凭据或数据目录。', 'success')
         elif action in RELEASE_URLS:
             from PySide6.QtGui import QDesktopServices
             from PySide6.QtCore import QUrl
             if not QDesktopServices.openUrl(QUrl(RELEASE_URLS[action])):
-                self.notify('未能打开系统浏览器，请稍后重试。', 'warning')
+                self.feedback('release', '未能打开系统浏览器，请稍后重试。', 'warning')
 
     @Property("QVariantMap", constant=True)
     def schema(self):
@@ -296,10 +298,10 @@ class Backend(QObject):
         try:
             return [dict(id=r['id'], name=r['name']) for r in AIProfiles(data_dir()).read()[0]]
         except Exception as exc:
-            self.notify(exc, 'danger')
+            self.feedback('profiles', exc, 'danger')
             return []
 
-    @Slot(str, str)
+    @Slot(str, str, result=bool)
     def aiProfileAction(self, action, value):
         def run():
             if self.controller.active:
@@ -307,7 +309,7 @@ class Backend(QObject):
             store = AIProfiles(data_dir())
             if action == 'save':
                 store.save(value, self.config)
-                self.notify('当前 AI 设置已保存为命名档案，配置与凭据均使用 DPAPI 加密。', 'success')
+                self.feedback('profiles', '当前 AI 设置已保存为命名档案，配置与凭据均使用 DPAPI 加密。', 'success')
             elif action == 'load':
                 values = store.load(value)
                 candidate = parse_text(serialize(self.config)); candidate['ai'].update(values); validate(candidate)
@@ -315,11 +317,11 @@ class Backend(QObject):
                 self.save_state = '有修改 · 未保存'
                 self.ai_status = '已切换档案 · 请主动测试；视觉仅为用户声明'
                 self.configChanged.emit()
-                self.notify('已显式切换 AI 档案；没有联网。请检查目标、模型与视觉声明。', 'success')
+                self.feedback('profiles', '已显式切换 AI 档案；没有联网。请检查目标、模型与视觉声明。', 'success')
             elif action == 'delete':
                 store.delete(value)
-                self.notify('档案已删除；当前已加载设置副本保持，可重新命名保存。')
-        self.execute(run)
+                self.feedback('profiles', '档案已删除；当前已加载设置副本保持，可重新命名保存。', 'success')
+        return self.execute(run, 'profiles')
 
     @Property(str, notify=changed)
     def capacityInfo(self):
@@ -360,6 +362,16 @@ class Backend(QObject):
     def draftFeedback(self):
         return self._draft_feedback
 
+    @Property(bool, notify=draftChanged)
+    def draftDirty(self):
+        return self._draft_dirty
+
+    @Property(str, notify=draftChanged)
+    def draftFeedbackTone(self):
+        if self._draft and (self._draft_input_errors or constraints(self._draft)):
+            return 'danger'
+        return 'success' if self._draft_saved else 'warning'
+
     def update_draft_feedback(self):
         errors = list(self._draft_input_errors.values()) + constraints(self._draft)
         self._draft_feedback = ('已保存本机副本' if self._draft_saved else '尚未保存本机副本') + ' v' + str(self._draft['version']) + '\n' + (
@@ -380,7 +392,9 @@ class Backend(QObject):
             self._draft = next((r for r in saved if r['id'] == row['id']), row)
             self._draft_account = account
             self._draft_saved = self._draft['version'] > 0
+            self._draft_dirty = False
             self._draft_input_errors = {}
+            self.clearUiFeedback('draft')
             self.update_draft_feedback()
             self.draftOpened.emit(self._draft)
             self.changed.emit()
@@ -389,6 +403,8 @@ class Backend(QObject):
     @Slot(str)
     def setDraftContent(self, text):
         if self.draftEditable and self._draft['kind'] == 'discussion':
+            self.clearUiFeedback('draft')
+            self._draft_dirty = self._draft_dirty or text != self._draft['content']
             if len(text) > 12000:
                 self._draft_input_errors['content'] = '讨论输入超过 12000 字符的本地编辑容量；该输入未进入副本，请缩短后再保存／导出。'
             else:
@@ -404,6 +420,8 @@ class Backend(QObject):
         if question_id not in {q['id'] for q in self._draft['source']['questions']}:
             return
         candidate = dict(question_id=question_id, **{k: v for k, v in answer.items() if k in ('text', 'option_ids')})
+        self.clearUiFeedback('draft')
+        self._draft_dirty = True
         import copy
         test = copy.deepcopy(self._draft)
         test['answers'] = [a for a in test['answers'] if a['question_id'] != question_id] + [candidate]
@@ -420,7 +438,7 @@ class Backend(QObject):
         self._draft_saved = False
         self.update_draft_feedback()
 
-    @Slot()
+    @Slot(result=bool)
     def saveDraftCopy(self):
         def run():
             if not self.draftEditable:
@@ -429,8 +447,10 @@ class Backend(QObject):
                 raise ValueError('存在未进入副本的超容量／非法输入，请先修正。')
             self._draft = DraftCopies(data_dir(), self._draft_account).save(self._draft)
             self._draft_saved = True
+            self._draft_dirty = False
             self.update_draft_feedback()
-        self.execute(run)
+            self.feedback('draft', '人工副本已保存到本机；未提交到平台。', 'success')
+        return self.execute(run, 'draft')
 
     @Slot(bool)
     def exportDraftCopy(self, clipboard):
@@ -443,13 +463,13 @@ class Backend(QObject):
             if clipboard:
                 from PySide6.QtGui import QGuiApplication
                 QGuiApplication.clipboard().setText(text)
-                self.notify('人工编辑副本已复制，未触发提交。')
+                self.feedback('draft', '人工编辑副本已复制，未触发提交。', 'success')
             else:
                 name, _ = QFileDialog.getSaveFileName(None, '导出人工编辑副本（含正文，仅供自行保管）', 'draft-copy.txt', '文本 (*.txt)')
                 if name:
                     atomic_write(Path(name), text.encode('utf-8'))
-                    self.notify('编辑副本已导出，包含正文；未触发提交。', 'success')
-        self.execute(run)
+                    self.feedback('draft', '编辑副本已导出，包含正文；未触发提交。', 'success')
+        self.execute(run, 'draft')
 
     @Slot(result='QVariantList')
     def listDraftCopies(self):
@@ -457,10 +477,10 @@ class Backend(QObject):
             rows, _ = DraftCopies(data_dir(), self.draft_account()).read() if self.draft_account() else ([], None)
             return [dict(id=r['id'], title=r['source']['title'], version=r['version']) for r in rows]
         except Exception as exc:
-            self.notify(exc, 'danger')
+            self.feedback('savedDrafts', exc, 'danger')
             return []
 
-    @Slot(str, int)
+    @Slot(str, int, result=bool)
     def deleteSavedDraft(self, copy_id, version):
         def run():
             if self.controller.active or not self.draft_account():
@@ -468,24 +488,28 @@ class Backend(QObject):
             DraftCopies(data_dir(), self.draft_account()).delete(copy_id, version)
             if self._draft and self._draft['id'] == copy_id:
                 self._draft = None
-            self.notify('人工副本已删除；原始草稿与所有防重意图保持。')
-        self.execute(run)
+            self.feedback('savedDrafts', '人工副本已删除；原始草稿与所有防重意图保持。', 'success')
+        return self.execute(run, 'savedDrafts')
 
-    @Slot(str)
+    @Slot(str, result=bool)
     def openSavedDraft(self, copy_id):
         def run():
             account = self.draft_account()
             if not account:
-                return
+                raise ValueError('请先选择原账号，再查看其人工副本。')
             rows, _ = DraftCopies(data_dir(), account).read()
             row = next((r for r in rows if r['id'] == copy_id), None)
             if row:
                 self._draft, self._draft_account, self._draft_saved = row, account, True
+                self._draft_dirty = False
+                self.clearUiFeedback('draft')
                 self._draft_input_errors = {}
                 self.update_draft_feedback()
                 self.draftOpened.emit(row)
                 self.changed.emit()
-        self.execute(run)
+            else:
+                raise ValueError('所选副本已不存在，请重新打开列表。')
+        return self.execute(run, 'savedDrafts')
 
     @Property(str, notify=changed)
     def aiWarning(self):
@@ -537,7 +561,7 @@ class Backend(QObject):
             self.changed.emit()
             return False
 
-    @Slot(str)
+    @Slot(str, result=bool)
     def prepareRecovery(self, run_id):
         def run():
             if self.controller.active:
@@ -560,7 +584,7 @@ class Backend(QObject):
                 self._recovery = None
                 raise
             self.pageRequested.emit(0)
-        self.execute(run)
+        return self.execute(run, 'recovery')
 
     @Property('QVariantMap', notify=changed)
     def serviceHealth(self):
@@ -651,6 +675,21 @@ class Backend(QObject):
     def notify(self, message, tone="info"):
         self.message, self.tone = self.redact(message), tone
         self.changed.emit()
+
+    @Property('QVariantMap', notify=changed)
+    def uiFeedback(self):
+        return {key: dict(value) for key, value in self._ui_feedback.items()}
+
+    @Slot(str)
+    def clearUiFeedback(self, scope):
+        if self._ui_feedback.pop(scope, None) is not None:
+            self.changed.emit()
+
+    def feedback(self, scope, message, tone='info'):
+        if scope not in ('profiles', 'draft', 'savedDrafts', 'recovery', 'release', 'record'):
+            raise ValueError('Unknown UI feedback scope')
+        self._ui_feedback[scope] = dict(message=self.redact(message)[:6000], tone=tone)
+        self.notify(message, tone)
 
     def sync_providers(self):
         enabled = self.enabled_providers()
@@ -1036,7 +1075,7 @@ class Backend(QObject):
         record = self._activity_model.detail(record_id)
         if record:
             QGuiApplication.clipboard().setText(record['detailText'])
-            self.notify('活动逐题草稿已复制。')
+            self.feedback('record', '活动逐题草稿已复制。', 'success')
 
     @Slot(str)
     def previewActivity(self, topic):
@@ -1087,7 +1126,7 @@ class Backend(QObject):
         record = self._discussion_model.detail(record_id)
         if record.get('content'):
             QGuiApplication.clipboard().setText(record['content'])
-            self.notify('讨论正文已复制。')
+            self.feedback('record', '讨论正文已复制。', 'success')
 
     @Slot()
     def pause(self):
@@ -1151,13 +1190,20 @@ class Backend(QObject):
     def checkAi(self):
         self.execute(lambda: self.begin("check_ai"))
 
-    def execute(self, command):
+    def execute(self, command, scope=''):
+        if scope:
+            self.clearUiFeedback(scope)
         try:
             command()
+            return True
         except Exception as exc:
-            self.notify(exc, "danger")
+            if scope:
+                self.feedback(scope, exc, 'danger')
+            else:
+                self.notify(exc, "danger")
             if hasattr(exc, 'section'):
                 self.locate_invalid_field(exc)
+            return False
 
     @Slot()
     def stop(self):

@@ -248,6 +248,10 @@ def main():
         QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, point); QTest.qWait(100)
         assert b.draftAnswer('extreme-99')['option_ids'] == ['option-99']
         click('closeDraftEditor')
+        assert find('discardDraftEdits').property('opened'), 'unsaved changes must be explicit'
+        click('discardDraftEdits_cancel'); assert find('draftEditor').property('opened')
+        assert b.draftAnswer('extreme-99')['option_ids'] == ['option-99']
+        click('closeDraftEditor'); click('discardDraftEdits_primary'); QTest.qWait(240)
 
         b._discussion_model.upsert(discussion_record(stage='publish_unknown')); b.changed.emit()
         saved = next(r for r in b.listDraftCopies() if r['title'] == '合成讨论')

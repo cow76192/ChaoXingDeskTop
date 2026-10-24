@@ -35,6 +35,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Service scrolling and media UI acceptance fail
 if ($LASTEXITCODE -ne 0) { throw 'Answer matching UI acceptance failed' }
 & $taskPython tests/workbench_ui_smoke.py build/workbench-ui-smoke
 if ($LASTEXITCODE -ne 0) { throw 'Workbench source UI acceptance failed' }
+& $taskPython tests/dialog_ui_smoke.py build/dialog-ui-smoke
+if ($LASTEXITCODE -ne 0) { throw 'Dialog actions and feedback UI acceptance failed' }
 $taskOutput = [System.IO.Path]::GetFullPath((Join-Path $taskRoot $OutputDirectory))
 $taskDistRoot = [System.IO.Path]::GetFullPath((Join-Path $taskRoot 'dist')) + [System.IO.Path]::DirectorySeparatorChar
 if (-not $taskOutput.StartsWith($taskDistRoot, [System.StringComparison]::OrdinalIgnoreCase)) {

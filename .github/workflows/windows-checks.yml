@@ -50,6 +50,8 @@ jobs:
             $env:QT_SCALE_FACTOR = $workbenchScale
             .venv-ci/Scripts/python.exe tests/workbench_ui_smoke.py "build/ci-checks/workbench-$workbenchScale"
             if ($LASTEXITCODE -ne 0) { throw "Workbench UI regression failed at scale $workbenchScale" }
+            .venv-ci/Scripts/python.exe tests/dialog_ui_smoke.py "build/ci-checks/dialog-$workbenchScale"
+            if ($LASTEXITCODE -ne 0) { throw "Dialog UI regression failed at scale $workbenchScale" }
           }
           $env:QT_SCALE_FACTOR = '1'
           $env:QT_QPA_PLATFORM = 'offscreen'

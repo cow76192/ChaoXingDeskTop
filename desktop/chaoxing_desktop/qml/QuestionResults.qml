@@ -60,12 +60,12 @@ ColumnLayout {
         }
         Text { visible: results.count === 0; anchors.centerIn: parent; text: "暂无逐题记录；离线演示也可体验此功能"; color: "#627086" }
     }
-    Dialog {
+    ActionDialog {
         id: detail; objectName: "questionDetail"
+        cancelText: "关闭"
         title: "题目处理详情"; modal: true; anchors.centerIn: parent
         width: Math.min(pane.width, 760); height: Math.min(560, pane.Window.height - 100)
         background: Rectangle { color: "white"; radius: 12; border.color: "#dbe3ef" }
-        standardButtons: Dialog.Close
         contentItem: ScrollView {
             clip: true; contentWidth: availableWidth
             TextArea {

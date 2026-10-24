@@ -72,17 +72,22 @@ Basic.Dialog {
                 }
             }
         }
-        ScrollView {
-            Layout.fillWidth: true; Layout.preferredHeight: 82; clip: true; contentWidth: availableWidth
-            TextArea { text: bridge.draftFeedback; readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap; color: "#995a0d"; background: null; textFormat: TextEdit.PlainText }
-        }
+        NoticeBanner { message: bridge.draftFeedback; tone: bridge.draftFeedbackTone; Layout.fillWidth: true; maximumHeight: 100 }
+        OperationNotice { objectName: "draftOperationNotice"; scope: "draft"; Layout.fillWidth: true; maximumHeight: 100 }
     }
     footer: RowLayout {
         spacing: 8
-        ActionButton { objectName: "saveDraftCopy"; text: "保存本机副本"; enabled: bridge.draftEditable; onClicked: bridge.saveDraftCopy() }
+        ActionButton { objectName: "saveDraftCopy"; text: "保存本机副本"; tone: "save"; enabled: bridge.draftEditable; onClicked: bridge.saveDraftCopy() }
         ActionButton { text: "复制副本"; onClicked: bridge.exportDraftCopy(true) }
-        ActionButton { text: "导出副本…"; onClicked: bridge.exportDraftCopy(false) }
+        ActionButton { text: "导出副本…"; tone: "save"; subtle: true; onClicked: bridge.exportDraftCopy(false) }
         Item { Layout.fillWidth: true }
-        ActionButton { objectName: "closeDraftEditor"; text: "关闭"; onClicked: editor.close() }
+        ActionButton { objectName: "closeDraftEditor"; text: "关闭"; onClicked: { if (bridge.draftDirty) discard.open(); else editor.close() } }
+    }
+    ActionDialog {
+        id: discard; objectName: "discardDraftEdits"
+        title: "人工副本尚有未保存的修改"; width: Math.min(540, editor.parent.width - 50); height: 250
+        primaryText: "放弃本次修改"; primaryTone: "danger"; cancelText: "继续编辑"
+        contentItem: NoticeBanner { tone: "warning"; message: "关闭后再次打开会读取已保存的副本。请返回编辑器保存或导出需要保留的内容；放弃修改不会改变原始草稿或提交意图。" }
+        onAccepted: editor.close()
     }
 }

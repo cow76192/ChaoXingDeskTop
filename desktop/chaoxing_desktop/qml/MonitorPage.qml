@@ -61,8 +61,8 @@ ColumnLayout {
                 RowLayout {
                     Layout.fillWidth: true
                     ActionButton { objectName: "history_button"; text: "运行摘要"; onClicked: { bridge.loadRunHistory(); history.open() } }
-                    ActionButton { objectName: "recovery_button"; text: "从摘要选课…"; enabled: !bridge.summary.busy; onClicked: { bridge.loadRunHistory(); recovery.open() } }
-                    ActionButton { objectName: "saved_drafts_button"; text: "本地副本…"; enabled: !bridge.summary.busy; onClicked: { savedDrafts.rows = bridge.listDraftCopies(); savedDrafts.open() } }
+                    ActionButton { objectName: "recovery_button"; text: "从摘要选课…"; enabled: !bridge.summary.busy; onClicked: { bridge.clearUiFeedback("recovery"); bridge.loadRunHistory(); recovery.open() } }
+                    ActionButton { objectName: "saved_drafts_button"; text: "本地副本…"; enabled: !bridge.summary.busy; onClicked: { bridge.clearUiFeedback("savedDrafts"); savedDrafts.rows = bridge.listDraftCopies(); savedDrafts.open() } }
                     ActionButton { objectName: "capacity_button"; text: "容量…"; onClicked: capacity.open() }
                     Text { visible: !!bridge.historyError; text: bridge.historyError; color: "#b42323"; wrapMode: Text.Wrap; font.pixelSize: 12; Layout.fillWidth: true }
                 }
@@ -167,47 +167,56 @@ ColumnLayout {
         title: "显示与写盘容量"; width: Math.min(720, page.width); height: Math.min(580, parent.height - 50)
         bodyText: bridge.capacityInfo
     }
-    Basic.Dialog {
+    ActionDialog {
         id: savedDrafts; objectName: "savedDraftsDialog"; property var rows: []
         parent: Overlay.overlay; anchors.centerIn: parent; modal: true
-        title: "按账号保存的人工副本"; width: Math.min(600, page.width); height: 280
+        title: "按账号保存的人工副本"; width: Math.min(600, page.width); height: Math.min(440, parent.height - 50)
         padding: 18
         background: Rectangle { color: "white"; radius: 12; border.color: "#cdd7e6" }
-        standardButtons: Dialog.Ok | Dialog.Cancel
+        primaryText: "打开所选副本"; cancelText: "关闭"; autoAccept: false
+        primaryEnabled: savedDraft.currentIndex >= 0 && rows.length > 0 && !bridge.summary.busy && (bridge.uiFeedback.savedDrafts || {}).tone !== "danger"
         contentItem: ColumnLayout {
             Label { text: "最多 20 项 / 2 MiB，容量满不自动丢弃人工编辑。来源未在当前轮确认时只读，可复制或导出。这里不会改变提交去重记录。"; Layout.fillWidth: true; wrapMode: Text.Wrap }
-            ChoiceBox { id: savedDraft; Layout.fillWidth: true; model: savedDrafts.rows; textRole: "title"; valueRole: "id"; Accessible.name: "选择人工副本" }
-            ActionButton { objectName: "deleteSavedDraft"; text: "删除所选人工副本…"; enabled: savedDraft.currentIndex >= 0 && !bridge.summary.busy; onClicked: { deleteDraft.copyId = savedDraft.currentValue; deleteDraft.copyVersion = savedDrafts.rows[savedDraft.currentIndex].version; deleteDraft.open() } }
-            Label { visible: !savedDrafts.rows.length; text: "当前账号没有保存的编辑副本。"; color: "#627086" }
+            ChoiceBox { id: savedDraft; Layout.fillWidth: true; enabled: savedDrafts.rows.length > 0; model: savedDrafts.rows; textRole: "title"; valueRole: "id"; Accessible.name: "选择人工副本" }
+            ActionButton { objectName: "deleteSavedDraft"; text: "删除所选人工副本…"; tone: "danger"; subtle: true; enabled: savedDraft.currentIndex >= 0 && savedDrafts.rows.length > 0 && !bridge.summary.busy && (bridge.uiFeedback.savedDrafts || {}).tone !== "danger"; onClicked: { deleteDraft.copyId = savedDraft.currentValue; deleteDraft.copyVersion = savedDrafts.rows[savedDraft.currentIndex].version; deleteDraft.copyTitle = savedDrafts.rows[savedDraft.currentIndex].title; deleteDraft.open() } }
+            NoticeBanner { visible: !savedDrafts.rows.length && (bridge.uiFeedback.savedDrafts || {}).tone !== "danger"; message: "当前账号没有保存的编辑副本。请先从讨论或问卷草稿中创建并保存本地副本。"; Layout.fillWidth: true }
+            OperationNotice { objectName: "savedDraftsNotice"; scope: "savedDrafts"; Layout.fillWidth: true }
+            Item { Layout.fillHeight: true }
         }
-        onAccepted: bridge.openSavedDraft(savedDraft.currentValue || "")
+        onPrimaryTriggered: if (bridge.openSavedDraft(savedDraft.currentValue || "")) accept()
     }
-    Basic.Dialog {
-        id: deleteDraft; objectName: "deleteDraftDialog"; property string copyId: ""; property int copyVersion: 0
+    ActionDialog {
+        id: deleteDraft; objectName: "deleteDraftDialog"; property string copyId: ""; property int copyVersion: 0; property string copyTitle: ""
         parent: Overlay.overlay; anchors.centerIn: parent; modal: true
-        title: "删除人工编辑副本？"; width: Math.min(550, page.width); height: 240; padding: 18
+        title: "删除人工编辑副本？"; width: Math.min(550, page.width); height: Math.min(370, parent.height - 50); padding: 18
         background: Rectangle { color: "white"; radius: 12; border.color: "#cdd7e6" }
-        standardButtons: Dialog.Ok | Dialog.Cancel
-        contentItem: Label { text: "仅删除所选的人工编辑副本，无法撤销。请先复制或导出需要保留的正文。原始草稿、发布／提交意图与平台状态全部保留。"; wrapMode: Text.Wrap }
-        onAccepted: { bridge.deleteSavedDraft(copyId, copyVersion); savedDrafts.rows = bridge.listDraftCopies() }
+        primaryText: "删除此副本"; primaryTone: "danger"; autoAccept: false
+        contentItem: ColumnLayout {
+            NoticeBanner { tone: "warning"; message: "将删除「" + deleteDraft.copyTitle + "」的人工副本（版本 " + deleteDraft.copyVersion + "），无法撤销。请先复制或导出正文。原始草稿、提交意图与平台状态保留。"; Layout.fillWidth: true }
+            OperationNotice { scope: "savedDrafts"; Layout.fillWidth: true }
+            Item { Layout.fillHeight: true }
+        }
+        onPrimaryTriggered: if (bridge.deleteSavedDraft(copyId, copyVersion)) { savedDrafts.rows = bridge.listDraftCopies(); accept() }
     }
-    Basic.Dialog {
+    ActionDialog {
         id: recovery; objectName: "recoveryDialog"; parent: Overlay.overlay; anchors.centerIn: parent; modal: true
-        title: "重新读课后选择未完成课程"; width: Math.min(620, page.width); height: 340
+        title: "重新读课后选择未完成课程"; width: Math.min(620, page.width); height: Math.min(460, parent.height - 50)
         padding: 18
         background: Rectangle { color: "white"; radius: 12; border.color: "#cdd7e6" }
-        standardButtons: Dialog.Ok | Dialog.Cancel
+        primaryText: "重新读课并选课"; autoAccept: false
+        primaryEnabled: recoveryRun.currentIndex >= 0 && bridge.runHistory.length > 0 && !bridge.historyError && !bridge.summary.busy
         contentItem: ColumnLayout {
             Label { text: "先连接原账号，再重新读取身份与课程。仅选择摘要中可定位的未完成课程；不会启动任务或重放旧写请求。请检查策略后手动开始新轮。"; wrapMode: Text.Wrap; Layout.fillWidth: true }
-            ChoiceBox { id: recoveryRun; objectName: "recoveryRun"; Layout.fillWidth: true; model: bridge.runHistory; textRole: "time"; valueRole: "id"; Accessible.name: "选择运行摘要" }
-            Label { text: bridge.historyError || (!bridge.runHistory.length ? "当前账号暂无摘要" : "仅保存前 1000 个未完成章节定位。旧摘要可能不含定位，届时需手动选课。"); wrapMode: Text.Wrap; color: "#627086"; Layout.fillWidth: true }
+            ChoiceBox { id: recoveryRun; objectName: "recoveryRun"; Layout.fillWidth: true; enabled: bridge.runHistory.length > 0; model: bridge.runHistory; textRole: "time"; valueRole: "id"; Accessible.name: "选择运行摘要" }
+            NoticeBanner { message: bridge.historyError || (!bridge.runHistory.length ? "当前账号暂无摘要，请先完成一轮任务后再使用此入口。" : "仅保存前 1000 个未完成章节定位；旧摘要没有定位时需手动选课。"); tone: bridge.historyError ? "danger" : "info"; Layout.fillWidth: true }
+            OperationNotice { objectName: "recoveryNotice"; scope: "recovery"; Layout.fillWidth: true }
+            Item { Layout.fillHeight: true }
         }
-        onAccepted: bridge.prepareRecovery(recoveryRun.currentValue || "")
+        onPrimaryTriggered: if (bridge.prepareRecovery(recoveryRun.currentValue || "")) accept()
     }
     ReadOnlyDialog {
         id: history; objectName: "historyDialog"; parent: Overlay.overlay; anchors.centerIn: parent; modal: true
         title: "当前账号的运行摘要（只读）"; width: Math.min(720, page.width); height: Math.min(560, parent.height - 50)
-        standardButtons: Dialog.Close
         bodyText: {
             let lines = ["摘要不是平台提交证据。再次处理需重新读取课程；不会重放旧请求。"]
             let names = {waiting: "等待", running: "处理中", processed: "待核验", success: "已核验", pending: "待完成", failed: "失败", skipped: "跳过", stopped: "停止"}
@@ -223,11 +232,11 @@ ColumnLayout {
             return lines.join("\n")
         }
     }
-    Dialog {
-        id: deleteLogsDialog; parent: Overlay.overlay; anchors.centerIn: parent; modal: true
+    ActionDialog {
+        id: deleteLogsDialog; objectName: "deleteLogsDialog"; parent: Overlay.overlay; anchors.centerIn: parent; modal: true
         title: "删除当前目录的应用日志？"; width: Math.min(540, page.width); height: 260
-        standardButtons: Dialog.Ok | Dialog.Cancel
-        contentItem: Label { text: "将删除下列目录中由本应用命名的日志文件，并清空当前显示。此操作无法撤销。\n\n" + bridge.summary.logDirectory; wrapMode: Text.Wrap }
+        primaryText: "删除日志文件"; primaryTone: "danger"
+        contentItem: NoticeBanner { tone: "warning"; message: "将删除下列目录中由本应用命名的日志文件，并清空当前显示。此操作无法撤销。\n\n" + bridge.summary.logDirectory }
         onAccepted: bridge.deleteLogs()
     }
 }

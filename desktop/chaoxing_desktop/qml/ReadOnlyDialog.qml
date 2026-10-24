@@ -3,16 +3,19 @@ import QtQuick.Controls
 import QtQuick.Controls.Basic as Basic
 import QtQuick.Layouts
 
-Basic.Dialog {
+ActionDialog {
     id: dialog
     property string bodyText: ""
+    property string noticeMessage: ""
+    property string noticeTone: "info"
     parent: Overlay.overlay
     anchors.centerIn: parent
     modal: true
     padding: 18
-    standardButtons: Dialog.Close
+    cancelText: "关闭"
     background: Rectangle { color: "white"; radius: 12; border.color: "#cdd7e6" }
     contentItem: ColumnLayout {
+        NoticeBanner { message: dialog.noticeMessage; tone: dialog.noticeTone; Layout.fillWidth: true }
         ScrollView {
             id: scroll
             Layout.fillWidth: true; Layout.fillHeight: true

@@ -59,16 +59,15 @@ ColumnLayout {
         }
         Text { visible: results.count === 0; anchors.centerIn: parent; text: "暂无活动记录；可在题库与 AI → 投票／问卷中设置策略与预览"; color: "#627086"; font.pixelSize: 12 }
     }
-    Dialog {
+    ActionDialog {
         id: detail; objectName: "activityDetail"; parent: Overlay.overlay; anchors.centerIn: parent
         title: "投票／问卷 · 逐题答案与核验详情"; modal: true
         width: Math.min(780, pane.Window.width - 60); height: Math.min(630, pane.Window.height - 100)
         background: Rectangle { color: "white"; radius: 12; border.color: "#dbe3ef" }
-        footer: Item {
-            implicitHeight: 58
-            ActionButton { anchors.right: parent.right; anchors.rightMargin: 20; anchors.verticalCenter: parent.verticalCenter; text: "关闭"; onClicked: detail.close() }
-        }
+        cancelText: "关闭"
+        onOpened: bridge.clearUiFeedback("record")
         contentItem: ColumnLayout {
+            OperationNotice { scope: "record"; Layout.fillWidth: true }
             ScrollView {
                 Layout.fillWidth: true; Layout.fillHeight: true; clip: true
                 TextArea {
@@ -77,7 +76,7 @@ ColumnLayout {
                 }
             }
             ActionButton { text: "复制逐题草稿"; enabled: !!pane.selected.detailText; onClicked: bridge.copyActivity(pane.selectedId) }
-            ActionButton { objectName: "editActivityCopy"; text: "编辑本地副本…"; enabled: (pane.selected.stage === "draft" || (pane.selected.stage === "pending" && pane.selected.submit_status === "draft")) && !bridge.summary.busy; onClicked: { detail.close(); bridge.openDraftCopy("activity", pane.selectedId) } }
+            ActionButton { objectName: "editActivityCopy"; text: "编辑本地副本…"; tone: "connect"; enabled: (pane.selected.stage === "draft" || (pane.selected.stage === "pending" && pane.selected.submit_status === "draft")) && !bridge.summary.busy; onClicked: { detail.close(); bridge.openDraftCopy("activity", pane.selectedId) } }
         }
     }
 }
