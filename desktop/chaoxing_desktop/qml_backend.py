@@ -32,6 +32,7 @@ from .ai_profiles import AIProfiles
 
 class Backend(QObject):
     changed = Signal()
+    busyChanged = Signal()
     configChanged = Signal()
     inputChanged = Signal()
     providersChanged = Signal()
@@ -155,8 +156,14 @@ class Backend(QObject):
         self.controller = Controller(self)
         self.controller.event.connect(self.on_event)
         self.controller.finished.connect(self.on_finished)
-        self.controller.busy_changed.connect(lambda _: self.changed.emit())
+        self.controller.busy_changed.connect(lambda _: self.busyChanged.emit())
+        self.controller.busy_changed.connect(lambda busy: self.changed.emit() if busy else None)
         self.configChanged.connect(self.refresh_redactor)
+        self._account_rows_cache, self._cookie_exists = [], False
+        self.verification_progress = {}
+        self._record_cards = {}
+        self.configChanged.connect(self.refresh_account_status)
+        self.refresh_account_status()
         self.refresh_redactor()
 
     def refresh_redactor(self):
@@ -267,27 +274,31 @@ class Backend(QObject):
                     questionRevision=self._question_revision,
                     questionStats=dict(self._question_model.stats),
                     discussionCount=len(self._discussion_model.rows), discussionEvicted=self._discussion_model.evicted,
-                    discussionStats={key: sum(r['stage'] == key for r in self._discussion_model.rows)
+                    discussionStats={key: self._discussion_model.stats.stages[key]
                                      for key in ('draft', 'published', 'existing', 'publish_unknown', 'pending', 'skipped')},
-                    discussionConfirmed=sum(r['task_status'] == 'confirmed' for r in self._discussion_model.rows),
+                    discussionConfirmed=self._discussion_model.stats.confirmed,
                     activityCount=len(self._activity_model.rows), activityEvicted=self._activity_model.evicted,
-                    activityStats={key: sum(r['stage'] == key for r in self._activity_model.rows)
+                    activityStats={key: self._activity_model.stats.stages[key]
                                    for key in ('draft', 'submitted', 'existing', 'submit_unknown', 'pending', 'rejected')},
-                    activitySources={key: sum(a['valid'] and a['source'] == key for r in self._activity_model.rows
-                                              for a in r['answers']) for key in ('ai', 'random', 'fixed')},
-                    activityConfirmed=sum(r['task_status'] == 'confirmed' for r in self._activity_model.rows),
+                    activitySources={key: self._activity_model.stats.sources[key] for key in ('ai', 'random', 'fixed')},
+                    activityConfirmed=self._activity_model.stats.confirmed,
+                    verificationProgress=dict(self.verification_progress),
                     mode=self.mode, demo=self.demo_mode, courseCount=len(self.courses),
                     selectedCount=len(self.selected), hiddenCount=hidden,
                     courseSearch=self.search,
                     total=total, success=counts["success"], pending=counts["pending"] + counts["processed"],
                     failed=counts["failed"], progress=round(100 * sum(counts[s] for s in TERMINAL) / total) if total else 0,
                     saveState=self.save_state, aiStatus=self.ai_status,
-                    cookie=self.cookie_path().exists() if self.account_store and self.account_store.active else False,
+                    cookie=self._cookie_exists,
                     activeAccount=self.account_store.active if self.account_store else '',
                     accountCount=len(self.account_store.rows) if self.account_store else 0,
                     accountError=self.account_error,
-                    logDirectory=str(LogStore.resolve(self.config['logging']['directory'])),
+                    logDirectory=self._log_directory,
                     logSaveError=self.log_save_error)
+
+    @Property(bool, notify=busyChanged)
+    def busy(self):
+        return self.controller.active
 
     @Property('QVariantMap', notify=changed)
     def aiUsage(self):
@@ -590,10 +601,6 @@ class Backend(QObject):
     def serviceHealth(self):
         return {key: self.service_health(key) for key in (*self.provider_order, 'ai')}
 
-    @Property('QVariantList', notify=changed)
-    def attentionRows(self):
-        return [dict(row) for row in self._attention_model.rows]
-
     @Property(QObject, constant=True)
     def attentionModel(self):
         return self._attention_filter
@@ -700,11 +707,23 @@ class Backend(QObject):
 
     @Property("QVariantList", notify=changed)
     def accountRows(self):
+        return [dict(row) for row in self._account_rows_cache]
+
+    def refresh_account_status(self):
+        # data_dir() creates/checks the profile directory. Keep this filesystem
+        # work out of the thousands of QML summary property reads per refresh.
+        self._log_directory = str(LogStore.resolve(self.config['logging']['directory']))
         if not self.account_store:
-            return []
-        return [dict(id=row['id'], label=row['label'], username=row['username'],
-                     display=row['label'] + (' · Cookie 已保存' if self.account_store.cookie_path(row['id']).exists() else ' · 需登录'))
-                for row in self.account_store.rows]
+            self._account_rows_cache, self._cookie_exists = [], False
+            return
+        self._account_rows_cache = []
+        self._cookie_exists = False
+        for row in self.account_store.rows:
+            exists = self.account_store.cookie_path(row['id']).exists()
+            self._account_rows_cache.append(dict(id=row['id'], label=row['label'], username=row['username'],
+                display=row['label'] + (' · Cookie 已保存' if exists else ' · 需登录')))
+            if row['id'] == self.account_store.active:
+                self._cookie_exists = exists
 
     def cookie_path(self):
         if not self.account_store or not self.account_store.active:
@@ -712,6 +731,8 @@ class Backend(QObject):
         return self.account_store.cookie_path(self.account_store.active)
 
     def reset_account_view(self):
+        self._record_cards.clear()
+        self.verification_progress = {}
         self._recovery = None
         self._draft = None
         self._draft_account = ''
@@ -791,6 +812,7 @@ class Backend(QObject):
             if not label.strip():
                 raise ValueError('账号备注不能为空。')
             store.update(store.active, label=label.strip()[:80])
+            self.refresh_account_status()
             self.changed.emit()
         self.execute(run)
 
@@ -1013,7 +1035,11 @@ class Backend(QObject):
     def verifyRecords(self):
         self._verify(True)
 
-    def _verify(self, records):
+    @Slot()
+    def verifyAllRecords(self):
+        self._verify(True, all_records=True)
+
+    def _verify(self, records, all_records=False):
         def run():
             if self.controller.active:
                 raise ValueError('请先结束当前操作。')
@@ -1022,25 +1048,32 @@ class Backend(QObject):
                 return
             if self.identity() != self.course_identity:
                 raise ValueError('账号或会话已变化，请重新读取课程。')
+            related = {r['task_id'] for model in (self._discussion_model, self._activity_model) for r in model.rows}
             targets = [{k: t[k] for k in ('id', 'courseId', 'clazzId', 'pointId')}
-                       for t in self.tasks if (records or t['status'] != 'success')
+                       for t in self.tasks if (all_records or t['status'] != 'success' or records and t['id'] in related)
                        and all(k in t for k in ('courseId', 'clazzId', 'pointId'))]
             if not targets:
                 raise ValueError('当前没有可定位的待核验章节，请先读取并运行课程。')
+            if records and not all_records:
+                for target in targets:
+                    if target['id'] in self._record_cards:
+                        target['record_cards'] = self._record_cards[target['id']]
             config = defaults()
             config['common'].update(username=self.config['common']['username'], password='', use_cookies='true')
             validate(config, login=True, cookie_path=self.cookie_path())
             self.operation, self.outcome = 'verify', False
+            self.verification_progress = {}
             self.operation_account = self.account_store.active
             payload = to_payload(config)
             self.log_redactor = Redactor(payload)
-            self.mode = '只读章节核验'
+            self.mode = '本人记录全量发现' if all_records else '本人记录待处理核验' if records else '只读章节核验'
             self.controller.start(dict(action='verify', config=payload, demo=False, targets=targets,
                                        verify_records=records,
                                        data_dir=str(data_dir()), account_id=self.operation_account,
                                        cookie_mtime_ns=self.cookie_path().stat().st_mtime_ns,
                                        account_uid=self.account_store.get(self.operation_account)['uid']))
-            self.notify('仅读取章节' + ('及本人讨论／活动状态' if records else '完成状态') + '；不生成、不写入，未决意图保留。')
+            self.notify(('全量发现所有可定位章节，卡数未知时每章最多读取 7 卡。' if all_records else
+                         '范围：待处理章节及本轮已有讨论／活动的关联章节。' if records else '范围：待核验章节。') + '只读查询已启动，未决意图保留。')
         self.execute(run)
 
     @Slot(bool, str)
@@ -1243,6 +1276,32 @@ class Backend(QObject):
         if event.get('run_id', self.controller.run_id) != self.controller.run_id:
             return
         kind = event.get("type")
+        if kind == 'record_card_hint':
+            if self.operation == 'run' and len(self._record_cards) < 10000:
+                self._record_cards[event['id']] = sorted(set(event['indices']))
+            return
+        if kind == 'verification_failed':
+            if (self.operation == 'verify' and self.operation_account and self.account_store
+                    and self.account_store.active == self.operation_account):
+                index = self._task_model.indices.get(event['id'])
+                if index is not None:
+                    task = self.tasks[index]
+                    task.update(checked_at=event['checked_at'], evidence=event['reason'])
+                    self._attention_model.upsert('核验失败:' + task['id'], dict(id=task['id'], task=task['id'], kind='核验',
+                        title=task['title'], course=task['course'], status='本次读取失败', bucket='failed',
+                        reason=event['reason'], next='旧状态保留，不代表本次核验成功；稍后重试。'))
+                    if not self._progress_timer.isActive():
+                        self._progress_timer.start()
+            return
+        if kind == 'verification_progress':
+            if (self.operation == 'verify' and self.operation_account and self.account_store
+                    and self.account_store.active == self.operation_account):
+                self.verification_progress = {k: event[k] for k in ('phase', 'completed', 'total', 'reads', 'failures', 'elapsed_ms')}
+                if not self.controller.stopping:
+                    self.message = event['message']
+                if not self._progress_timer.isActive():
+                    self._progress_timer.start()
+            return
         if kind == 'ai_usage':
             self.ai_usage = {k: event[k] for k in ('requests', 'limit', 'known', 'unknown', 'tokens')}
             if not self._progress_timer.isActive():
@@ -1255,17 +1314,23 @@ class Backend(QObject):
             row = self._task_model.indices.get(event['id'])
             if row is not None:
                 task = self.tasks[row]
+                self._attention_model.upsert('核验失败:' + task['id'], None)
                 task.update(checked_at=event['checked_at'], evidence=event['reason'])
                 if event['confirmed']:
                     self._task_model.update_status(event['id'], 'success')
                 elif task['status'] == 'success':
                     self._task_model.update_status(event['id'], 'pending')
                 self._attention_model.upsert('章节:' + task['id'], chapter_issue(task))
-                self.changed.emit()
+                if not self._progress_timer.isActive():
+                    self._progress_timer.start()
             return
         if kind == 'verification_done':
+            if (self.operation != 'verify' or not self.operation_account or not self.account_store
+                    or self.account_store.active != self.operation_account):
+                return
             self.outcome = True
             self.mode = '只读核验已结束'
+            self._progress_timer.stop()
             self.notify(event['message'], 'info')
             return
         if kind == 'record_verification':
@@ -1274,7 +1339,8 @@ class Backend(QObject):
                 return
             label = '讨论' if event['kind'] == 'discussion' else '投票／问卷'
             model = self._discussion_model if event['kind'] == 'discussion' else self._activity_model
-            detail = model.detail(event['id'])
+            index = model.indices.get(event['id'])
+            detail = model.rows[index] if index is not None else {}
             task_index = self._task_model.indices.get(event['task_id'])
             if task_index is None:
                 return
@@ -1286,7 +1352,8 @@ class Backend(QObject):
                      bucket='platform', reason=event['checked_at'] + '\n' + event['reason'] + '\n任务点：' +
                      ('已确认' if event['task_status'] == 'confirmed' else '待确认'),
                      next='在平台检查当前本人记录。历史与本地未决意图保持，不提供强制重发。'))
-            self.changed.emit()
+            if not self._progress_timer.isActive():
+                self._progress_timer.start()
             return
         if kind in ('activity_result', 'activity_preview'):
             if event['record']['run_id'] != self.controller.run_id:
@@ -1441,7 +1508,6 @@ class Backend(QObject):
                 self.remember_check(self.check_target, event.get('message', '测试失败'))
             self.append_log(event.get("message", "后台运行失败"), "ERROR")
             self.notify(event.get("message", "后台运行失败"), "warning" if kind == "cancelled" else "danger")
-        self.changed.emit()
 
     def clear_input(self):
         self.interaction = {}
@@ -1455,6 +1521,7 @@ class Backend(QObject):
         self.clear_input()
 
     def on_finished(self, code):
+        self.refresh_account_status()
         self._recovery = None
         if self.operation == 'run':
             self._draft_sources_uncertain = not (self._run_completed and code == 0 and not self.controller.stopping)
@@ -1469,10 +1536,10 @@ class Backend(QObject):
         self._history_timer.stop()
         if self.controller.stopping:
             self.mode = "已停止"
-            self.notify("后台已停止。已发送到平台的请求不会撤销，可重新开始。", "warning")
+            self.message, self.tone = "后台已停止。已发送到平台的请求不会撤销，可重新开始。", 'warning'
         elif not self.outcome:
             self.mode = "后台异常退出"
-            self.notify(f"后台退出（{code}），未收到完成结果。请检查软件目录及日志。", "danger")
+            self.message, self.tone = f"后台退出（{code}），未收到完成结果。请检查软件目录及日志。", 'danger'
         if self.operation == 'run':
             saved = self.save_run_summary(self.mode)
             error = self.history_error

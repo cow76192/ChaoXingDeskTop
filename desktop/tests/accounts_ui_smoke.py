@@ -161,13 +161,13 @@ with tempfile.TemporaryDirectory() as directory:
         click('courses_clear_selection')
         assert b.summary['selectedCount'] == 0
 
-    b.controller.active = True
+    b.controller.active = True; b.controller.busy_changed.emit(True)
     b.changed.emit()
     QTest.qWait(60)
     assert not selector.isEnabled()
     assert not find('account_add').isEnabled()
     assert not find('account_delete').isEnabled()
-    b.controller.active = False
+    b.controller.active = False; b.controller.busy_changed.emit(False)
     b.changed.emit()
     click('account_add')
     assert not b.summary['activeAccount']

@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 ColumnLayout {
+    readonly property var workbenchSummary: bridge.summary
     id: pane
     property var selected: ({})
     Connections {
@@ -11,9 +12,16 @@ ColumnLayout {
     }
     RowLayout {
         Layout.fillWidth: true
-        ActionButton { objectName: "verifyPending"; text: "只读核验章节"; enabled: !bridge.summary.busy; onClicked: bridge.verifyPending() }
-        ActionButton { objectName: "verifyRecords"; text: "核验本人讨论／活动"; enabled: !bridge.summary.busy; onClicked: bridge.verifyRecords() }
+        ActionButton { objectName: "verifyPending"; text: "只读核验章节"; enabled: !workbenchSummary.busy; onClicked: bridge.verifyPending() }
+        ActionButton { objectName: "verifyRecords"; text: "核验本人讨论／活动（待处理）"; enabled: !workbenchSummary.busy; onClicked: bridge.verifyRecords() }
+        ActionButton { objectName: "verifyAllRecords"; text: "全量发现本人记录"; enabled: !workbenchSummary.busy; onClicked: bridge.verifyAllRecords() }
         Text { text: "只读 · 未决意图保留"; color: "#627086"; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 }
+    }
+    Text {
+        property var progress: workbenchSummary.verificationProgress || ({})
+        visible: !!progress.phase
+        text: "核验已处理 " + (progress.completed || 0) + "/" + (progress.total || 0) + " 章 · 章节／卡片读取 " + (progress.reads || 0) + " · 失败 " + (progress.failures || 0) + " · " + Math.round((progress.elapsed_ms || 0) / 1000) + " 秒"
+        color: "#627086"; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true
     }
     RowLayout {
         Layout.fillWidth: true
@@ -24,7 +32,7 @@ ColumnLayout {
             onActivated: bridge.filterAttention(search.text, currentValue || "")
         }
     }
-    Text { text: "汇总本轮待处理原因（最多 2000 项 / 8 MiB" + (bridge.summary.attentionEvicted ? "，已淘汰 " + bridge.summary.attentionEvicted + " 项显示记录" : "") + "）。可到各结果标签检查其保留记录；未决意图保持。"; color: "#627086"; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true }
+    Text { text: "汇总本轮待处理原因（最多 2000 项 / 8 MiB" + (workbenchSummary.attentionEvicted ? "，已淘汰 " + workbenchSummary.attentionEvicted + " 项显示记录" : "") + "）。可到各结果标签检查其保留记录；未决意图保持。"; color: "#627086"; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true }
     ListView {
         id: issues; objectName: "attentionList"
         model: bridge.attentionModel

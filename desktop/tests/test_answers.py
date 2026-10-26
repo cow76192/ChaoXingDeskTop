@@ -265,7 +265,7 @@ class PlatformAdapterTests(unittest.TestCase):
                               {"knowledgeid": "k", "ktoken": "t", "cpi": "cpi"})
         sent = session.post.call_args.kwargs["data"]
         self.assertEqual(sent["pyFlag"], "1")
-        self.assertEqual(sent["answer1"], "")
+        self.assertNotIn('answer1', sent)  # Unknown completion layout must not invent a POST field.
 
 
 if __name__ == "__main__":

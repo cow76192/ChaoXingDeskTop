@@ -12,7 +12,7 @@ import argparse
 import struct
 from pathlib import Path
 
-from PySide6.QtCore import QBuffer, QByteArray, QRectF, Qt
+from PySide6.QtCore import QBuffer, QRectF, Qt
 from PySide6.QtGui import QGuiApplication, QImage, QPainter
 from PySide6.QtSvg import QSvgRenderer
 

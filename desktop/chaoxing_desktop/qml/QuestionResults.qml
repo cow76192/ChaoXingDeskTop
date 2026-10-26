@@ -3,11 +3,12 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 ColumnLayout {
+    readonly property var workbenchSummary: bridge.summary
     id: pane
     property string taskId: ""
     property string selectedId: ""
     property var selected: {
-        let revision = bridge.summary.questionRevision
+        let revision = workbenchSummary.questionRevision
         return selectedId ? bridge.questionDetail(selectedId) : ({})
     }
     Connections {
@@ -31,11 +32,11 @@ ColumnLayout {
     Text {
         Layout.fillWidth: true; wrapMode: Text.Wrap; color: "#627086"; font.pixelSize: 12
         text: {
-            let s = bridge.summary.questionStats
-            return "最近 " + bridge.summary.questionCount + " 条 · 题库轮次 " + (s.query_attempts || 0) +
+            let s = workbenchSummary.questionStats
+            return "最近 " + workbenchSummary.questionCount + " 条 · 题库轮次 " + (s.query_attempts || 0) +
                    " · 题库请求 " + (s.requests || 0) + " · 题库候选 " + (s.candidates || 0) + " · 已采用 " + (s.resolved || 0) +
                    " · 缓存 " + (s.cache || 0) + " / AI " + (s.ai || 0) + " / 人工 " + (s.manual || 0) + " / 随机 " + (s.random || 0) +
-                   (bridge.summary.questionEvicted ? " · 已淘汰 " + bridge.summary.questionEvicted + " 条旧记录" : "") + "。统计不代表答案正确率。"
+                   (workbenchSummary.questionEvicted ? " · 已淘汰 " + workbenchSummary.questionEvicted + " 条旧记录" : "") + "。统计不代表答案正确率。"
         }
     }
     ListView {

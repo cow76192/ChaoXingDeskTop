@@ -1,5 +1,4 @@
 """Rendered regression for multi-blank input, filter reset and log reading."""
-import json
 import os
 from pathlib import Path
 import sys
@@ -46,7 +45,7 @@ def main():
             window.setWidth(980);window.setHeight(700);QTest.qWait(160)
             assert find('courseList').height()>=100
             assert window.grabWindow().save(str(output/'courses-980.png'))
-            b.controller.active=True;b.changed.emit()
+            b.controller.active=True; b.controller.busy_changed.emit(True);b.changed.emit()
             with patch.object(b.controller,'reply') as reply:
                 b.on_event(dict(type='input',kind='question',question=dict(type='completion',title='Synthetic two-blank question',blank_count=2)))
                 QTest.qWait(100)
@@ -61,7 +60,7 @@ def main():
                 assert find('manual_blank_0').property('text')==''
                 assert window.grabWindow().save(str(output/'multi-blank.png'))
                 click('manual_skip')
-            b.controller.active=False;b.changed.emit()
+            b.controller.active=False; b.controller.busy_changed.emit(False);b.changed.emit()
             window.setProperty('pageIndex',4);QTest.qWait(100)
             pane=property_item('taskId');pane.setProperty('taskId','old-chapter')
             find('questionPending').setProperty('checked',True)
@@ -87,7 +86,7 @@ def main():
             assert not engine.load_warnings,engine.load_warnings
             print('Audit UI passed: two blanks/reset, account filters, narrow list, log scroll/filter; no QML warnings.')
         finally:
-            b.controller.active=False;b.discardAndClose();delete(engine);delete(b);app.processEvents()
+            b.controller.active=False; b.controller.busy_changed.emit(False);b.discardAndClose();delete(engine);delete(b);app.processEvents()
 
 
 if __name__=='__main__':main()

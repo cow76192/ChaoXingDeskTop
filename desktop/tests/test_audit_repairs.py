@@ -1,6 +1,4 @@
 """Regression coverage for the offline/real-account audit boundaries."""
-import io
-import json
 import os
 from pathlib import Path
 import subprocess

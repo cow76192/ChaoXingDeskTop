@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import sys
 import uuid
+import time
 
 from PySide6.QtCore import QObject, QProcess, Signal, QTimer
 
@@ -9,6 +10,7 @@ from PySide6.QtCore import QObject, QProcess, Signal, QTimer
 class Controller(QObject):
     MAX_FRAME_BYTES = 16 * 1024 * 1024
     EVENTS_PER_TICK = 128
+    EVENT_BUDGET_SECONDS = .006
     event = Signal(dict)
     finished = Signal(int)
     busy_changed = Signal(bool)
@@ -77,6 +79,7 @@ class Controller(QObject):
             return
         self.buffer.extend(bytes(self.process.read(64 * 1024)))
         consumed = 0
+        deadline = time.monotonic() + self.EVENT_BUDGET_SECONDS
         for _ in range(self.EVENTS_PER_TICK):
             end = self.buffer.find(b"\n", consumed)
             if end < 0:
@@ -98,6 +101,8 @@ class Controller(QObject):
                     if event.get('type') == 'input':
                         self.request_id = event.get('request_id', '')
                     self.event.emit(event)
+            if time.monotonic() >= deadline:
+                break
         if consumed:
             del self.buffer[:consumed]
         if len(self.buffer) > self.MAX_FRAME_BYTES:
@@ -141,12 +146,26 @@ class Controller(QObject):
         if kind == 'verification':
             return (type(event.get('confirmed')) is bool and
                     all(isinstance(event.get(k), str) and len(event[k]) <= 2000 for k in ('id', 'checked_at', 'reason')))
+        if kind == 'verification_failed':
+            return all(isinstance(event.get(k), str) and len(event[k]) <= 2000 for k in ('id', 'checked_at', 'reason'))
+        if kind == 'record_card_hint':
+            return (isinstance(event.get('id'), str) and len(event['id']) <= 256
+                    and isinstance(event.get('indices'), list) and 0 < len(event['indices']) <= 64
+                    and all(type(i) is int and 0 <= i < 64 for i in event['indices']))
         if kind == 'record_verification':
             return (event.get('kind') in ('discussion', 'activity') and
                     event.get('participation') in ('existing', 'absent', 'unknown') and
                     event.get('task_status') in ('confirmed', 'pending') and
                     all(isinstance(event.get(k), str) and len(event[k]) <= 2000
                         for k in ('id', 'task_id', 'checked_at', 'reason')))
+        if kind == 'verification_progress':
+            return (event.get('phase') in ('session', 'courses', 'chapters', 'cards', 'records')
+                    and isinstance(event.get('message'), str) and len(event['message']) <= 2000
+                    and all(type(event.get(k)) is int and 0 <= event[k] <= 10**9
+                            for k in ('completed', 'total', 'reads', 'failures', 'elapsed_ms'))
+                    and event['completed'] <= event['total'])
+        if kind == 'verification_done':
+            return isinstance(event.get('message'), str) and len(event['message']) <= 2000
         if kind == 'ai_usage':
             return (all(type(event.get(k)) is int and 0 <= event[k] <= 10**15
                         for k in ('requests', 'limit', 'known', 'unknown', 'tokens'))

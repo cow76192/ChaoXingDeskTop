@@ -4,6 +4,7 @@ import QtQuick.Controls.Basic as Basic
 import QtQuick.Layouts
 
 ColumnLayout {
+    readonly property var workbenchSummary: bridge.summary
     id: page
     objectName: "servicesPage"
     property string serviceArea: "banks"
@@ -57,8 +58,8 @@ ColumnLayout {
                     Layout.fillWidth: true; Layout.alignment: Qt.AlignTop
                     title: "题库服务"
                     description: "勾选启用，按从上到下的顺序查询。可先填写凭据再启用。"
-                    ActionButton { text: "离线协议自检"; enabled: !bridge.summary.busy; onClicked: bridge.offlineCheck() }
-                    Text { text: bridge.summary.bankStatus; Layout.fillWidth: true; wrapMode: Text.Wrap; color: "#627086"; font.pixelSize: 12 }
+                    ActionButton { text: "离线协议自检"; enabled: !workbenchSummary.busy; onClicked: bridge.offlineCheck() }
+                    Text { text: workbenchSummary.bankStatus; Layout.fillWidth: true; wrapMode: Text.Wrap; color: "#627086"; font.pixelSize: 12 }
                     Repeater {
                         model: bankRows
                         ColumnLayout {
@@ -71,7 +72,7 @@ ColumnLayout {
                                 Layout.fillWidth: true
                                 Basic.CheckBox {
                                     id: bankCheck
-                                    text: modelData.title; checked: modelData.enabled; enabled: !bridge.summary.busy; Layout.fillWidth: true; onToggled: bridge.toggleProvider(modelData.key, checked)
+                                    text: modelData.title; checked: modelData.enabled; enabled: !workbenchSummary.busy; Layout.fillWidth: true; onToggled: bridge.toggleProvider(modelData.key, checked)
                                     indicator: Rectangle {
                                         implicitWidth: 20; implicitHeight: 20; x: bankCheck.leftPadding; y: (bankCheck.height - height) / 2
                                         radius: 4; color: bankCheck.checked ? "#2563eb" : "white"; border.color: bankCheck.activeFocus ? "#2563eb" : "#64748b"; border.width: 2
@@ -89,8 +90,8 @@ ColumnLayout {
                                         })
                                     }
                                 }
-                                ToolButton { text: "↑"; Accessible.name: "上移 " + modelData.title; enabled: !bridge.summary.busy && index > 0; onClicked: bridge.moveProvider(index, -1) }
-                                ToolButton { text: "↓"; Accessible.name: "下移 " + modelData.title; enabled: !bridge.summary.busy && index < bridge.providers.length - 1; onClicked: bridge.moveProvider(index, 1) }
+                                ToolButton { text: "↑"; Accessible.name: "上移 " + modelData.title; enabled: !workbenchSummary.busy && index > 0; onClicked: bridge.moveProvider(index, -1) }
+                                ToolButton { text: "↓"; Accessible.name: "下移 " + modelData.title; enabled: !workbenchSummary.busy && index < bridge.providers.length - 1; onClicked: bridge.moveProvider(index, 1) }
                             }
                             Text { text: (index + 1) + " · " + (bridge.values.question_bank[modelData.secret] ? "已填写凭据 / 地址" : "凭据 / 地址未填") + " · " + bridge.serviceHealth[modelData.key]; color: "#627086"; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true }
                             Field { visible: parent.settingsOpen; spec: ({title: modelData.key === "TikuAdapter" ? "服务地址" : modelData.key === "TikuGo" ? "授权（可选）" : "Token", section: "question_bank", key: modelData.secret, kind: "secret", hint: "", low: 0, high: 100, choices: []}) }
@@ -104,9 +105,9 @@ ColumnLayout {
                             RowLayout {
                                 visible: parent.settingsOpen
                                 Layout.fillWidth: true
-                                ActionButton { text: "真实连接检查…"; tone: "test"; subtle: true; enabled: !bridge.summary.busy; onClicked: { bankConfirm.providerKey = modelData.key; bankConfirm.providerTitle = modelData.title; bankConfirm.open() } }
-                                ActionButton { visible: modelData.key === "TikuDeclarative"; text: "导入 JSON"; enabled: !bridge.summary.busy; onClicked: bridge.definitionAction("import") }
-                                ActionButton { visible: modelData.key === "TikuDeclarative"; text: "导出模板"; enabled: !bridge.summary.busy; onClicked: bridge.definitionAction("export") }
+                                ActionButton { text: "真实连接检查…"; tone: "test"; subtle: true; enabled: !workbenchSummary.busy; onClicked: { bankConfirm.providerKey = modelData.key; bankConfirm.providerTitle = modelData.title; bankConfirm.open() } }
+                                ActionButton { visible: modelData.key === "TikuDeclarative"; text: "导入 JSON"; enabled: !workbenchSummary.busy; onClicked: bridge.definitionAction("import") }
+                                ActionButton { visible: modelData.key === "TikuDeclarative"; text: "导出模板"; enabled: !workbenchSummary.busy; onClicked: bridge.definitionAction("export") }
                             }
                             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: "#edf0f5" }
                         }
@@ -117,9 +118,9 @@ ColumnLayout {
                     visible: page.serviceArea === "ai" || page.width > 880
                     Layout.fillWidth: true; Layout.alignment: Qt.AlignTop
                     title: "AI 补全"; description: "补全未解决的题目；需要服务与模型支持图片识别。"
-                    ActionButton { objectName: "ai_profiles_button"; text: "命名 AI 档案…"; enabled: !bridge.summary.busy; onClicked: { bridge.clearUiFeedback("profiles"); profiles.rows = bridge.listAiProfiles(); profiles.open() } }
+                    ActionButton { objectName: "ai_profiles_button"; text: "命名 AI 档案…"; enabled: !workbenchSummary.busy; onClicked: { bridge.clearUiFeedback("profiles"); profiles.rows = bridge.listAiProfiles(); profiles.open() } }
                     Repeater { model: bridge.schema.ai[0].fields; Field { required property var modelData; spec: modelData } }
-                    ActionButton { text: "测试 AI 连接…"; tone: "test"; glyph: "test"; enabled: !bridge.summary.busy; onClicked: aiConfirm.open() }
+                    ActionButton { text: "测试 AI 连接…"; tone: "test"; glyph: "test"; enabled: !workbenchSummary.busy; onClicked: aiConfirm.open() }
                     Text { text: bridge.serviceHealth.ai; color: "#627086"; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true }
                     Text { text: "课程运行时，未解决题目的题干、选项及启用视觉后的图片链接会发往当前 AI 服务；讨论发送主题与正文，活动发送题干、选项与约束。不会自动切换服务。"; color: "#627086"; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true }
                     Text { visible: !!bridge.aiWarning; text: bridge.aiWarning; color: "#995a0d"; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true }
@@ -157,11 +158,11 @@ ColumnLayout {
         contentItem: ColumnLayout {
             Label { text: "现有 AI 配置继续可用，可保存为“默认档案”。档案含当前服务地址、模型、视觉声明、请求限制与独立凭据，均用 DPAPI 加密。最多 20 项，仅显式切换，不自动联网或切换提供商。视觉能力仍须主动测试。"; wrapMode: Text.Wrap; Layout.fillWidth: true }
             Basic.TextField { id: profileName; objectName: "aiProfileName"; text: "默认档案"; maximumLength: 40; Layout.fillWidth: true; Accessible.name: "AI 档案名称" }
-            ActionButton { objectName: "saveAiProfile"; text: "保存当前设置／覆盖同名档案"; tone: "save"; enabled: !bridge.summary.busy; onClicked: { bridge.aiProfileAction("save", profileName.text); profiles.rows = bridge.listAiProfiles() } }
+            ActionButton { objectName: "saveAiProfile"; text: "保存当前设置／覆盖同名档案"; tone: "save"; enabled: !workbenchSummary.busy; onClicked: { bridge.aiProfileAction("save", profileName.text); profiles.rows = bridge.listAiProfiles() } }
             ChoiceBox { id: profileChoice; objectName: "aiProfileChoice"; enabled: profiles.rows.length > 0; model: profiles.rows; textRole: "name"; valueRole: "id"; Layout.fillWidth: true; Accessible.name: "选择 AI 档案" }
             RowLayout {
-                ActionButton { objectName: "loadAiProfile"; text: "切换到所选档案"; tone: "connect"; enabled: !bridge.summary.busy && profiles.rows.length > 0; onClicked: bridge.aiProfileAction("load", profileChoice.currentValue || "") }
-                ActionButton { objectName: "deleteAiProfile"; text: "删除所选档案…"; tone: "danger"; subtle: true; enabled: !bridge.summary.busy && profiles.rows.length > 0; onClicked: { bridge.clearUiFeedback("profiles"); deleteProfile.profileId = profileChoice.currentValue || ""; deleteProfile.profileName = profileChoice.currentText; deleteProfile.open() } }
+                ActionButton { objectName: "loadAiProfile"; text: "切换到所选档案"; tone: "connect"; enabled: !workbenchSummary.busy && profiles.rows.length > 0; onClicked: bridge.aiProfileAction("load", profileChoice.currentValue || "") }
+                ActionButton { objectName: "deleteAiProfile"; text: "删除所选档案…"; tone: "danger"; subtle: true; enabled: !workbenchSummary.busy && profiles.rows.length > 0; onClicked: { bridge.clearUiFeedback("profiles"); deleteProfile.profileId = profileChoice.currentValue || ""; deleteProfile.profileName = profileChoice.currentText; deleteProfile.open() } }
             }
             NoticeBanner { visible: !profiles.rows.length && (bridge.uiFeedback.profiles || {}).tone !== "danger"; message: "暂无已保存的 AI 档案。填写名称后，可将当前配置保存为一个档案。"; Layout.fillWidth: true }
             OperationNotice { objectName: "profilesNotice"; scope: "profiles"; Layout.fillWidth: true }

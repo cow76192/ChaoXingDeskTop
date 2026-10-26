@@ -42,6 +42,7 @@ def create_client(config, channel, courses_only=False):
         if task_id:
             channel.send('media', id=task_id, **values)
     client.desktop_media_progress = media_progress
+    client.desktop_record_cards = lambda **values: channel.send('record_card_hint', **values)
     return client
 
 
@@ -104,6 +105,13 @@ def _process_chapter(client, course, point, speed):
     jobs, info = client.get_job_list(course, point)
     if info.get("notOpen"):
         return ChapterResult.NOT_OPEN
+    hint = getattr(client, 'desktop_record_cards', None)
+    task_id = getattr(getattr(client, 'desktop_media_context', None), 'task_id', None)
+    if hint and task_id:
+        indices = {str(j.get('_job_info', {}).get('card_index', '')) for j in jobs
+                   if j.get('type') in ('discussion', 'activity')}
+        if indices and all(i.isdigit() and 0 <= int(i) < 64 for i in indices):
+            hint(id=task_id, indices=sorted({int(i) for i in indices}))
     title = point.get('title', point.get('id', ''))
     logger.info('章节「{}」检测到 {} 个待处理任务点。', title, len(jobs))
     # A chapter may contain several independent media. One unconfirmed job

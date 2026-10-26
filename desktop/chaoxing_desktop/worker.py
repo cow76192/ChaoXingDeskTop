@@ -254,6 +254,8 @@ def real(channel, command):
     # Listing courses must not initialize paid question-bank services.
     if verifying and (not common['use_cookies'] or common['password']):
         raise ValueError('只读核验仅使用已读取课程的 Cookie 会话，请先重新读课。')
+    if verifying:
+        channel.send('verification_progress', phase='session', message='正在校验账号会话…', completed=0, total=0, reads=0, failures=0, elapsed_ms=0)
     cx = core.create_client(command["config"], channel, courses_only=command["action"] in ('courses', 'verify'))
     checkpoint(channel)
     login = cx.login(login_with_cookies=common["use_cookies"])
@@ -272,6 +274,8 @@ def real(channel, command):
             channel.send('session_ready', account_id=account_id, uid=uid,
                          cookie_mtime_ns=store.cookie_path(account_id).stat().st_mtime_ns)
     checkpoint(channel)
+    if verifying:
+        channel.send('verification_progress', phase='courses', message='会话已校验，正在读取课程身份…', completed=0, total=0, reads=0, failures=0, elapsed_ms=0)
     courses = list({(str(c["courseId"]), str(c["clazzId"])): c for c in cx.get_course_list()}.values())
     if command["action"] == "courses":
         channel.send("courses", courses=courses, demo=False)

@@ -18,6 +18,7 @@ from chaoxing_desktop.config import defaults, to_payload
 from chaoxing_desktop.diagnostic_export import diagnostic_config
 from chaoxing_desktop.qml_backend import Backend
 from chaoxing_desktop.verification import verify_chapters
+from chaoxing_desktop.controller import Controller
 from chaoxing_desktop.worker import Channel, real
 from chaoxing_desktop.control import RunControl, Cancelled
 from chaoxing_desktop.run_history import RunHistory
@@ -143,7 +144,7 @@ class UpgradeTests(unittest.TestCase):
             output.seek(0); output.truncate()
             client.get_course_point.return_value = dict(points=[dict(id='p', has_finished=flag)])
             verify_chapters(client, channel, [course], targets)
-            event = json.loads(output.getvalue().splitlines()[0])
+            event = next(e for e in map(json.loads, output.getvalue().splitlines()) if e['type'] == 'verification')
             self.assertEqual(event['confirmed'], flag is True)
         client.get_course_point.return_value = dict(unexpected=[])
         with self.assertRaises(ValueError):
@@ -169,10 +170,11 @@ class UpgradeTests(unittest.TestCase):
                 if case.get('error'):
                     with self.assertRaises(ValueError):
                         verify_chapters(client, channel, [course], targets)
-                    self.assertEqual(output.getvalue(), '')
+                    self.assertTrue(all(e['type'] == 'verification_progress' for e in map(json.loads, output.getvalue().splitlines())))
                 else:
                     verify_chapters(client, channel, [course], targets)
-                    self.assertEqual(json.loads(output.getvalue().splitlines()[0])['confirmed'], case['expected'])
+                    event = next(e for e in map(json.loads, output.getvalue().splitlines()) if e['type'] == 'verification')
+                    self.assertEqual(event['confirmed'], case['expected'])
 
     def test_worker_readonly_branch_never_initializes_or_calls_write_routes(self):
         account = 'a' * 32
@@ -201,7 +203,9 @@ class UpgradeTests(unittest.TestCase):
             real(Channel(output, io.StringIO(), lambda text: text), command)
         self.assertTrue(core.create_client.call_args.kwargs['courses_only'])
         save.assert_not_called()
-        self.assertEqual([event['type'] for event in map(json.loads, output.getvalue().splitlines())], ['verification', 'verification_done'])
+        events = list(map(json.loads, output.getvalue().splitlines()))
+        self.assertEqual([e['type'] for e in events if e['type'] != 'verification_progress'], ['verification', 'verification_done'])
+        self.assertTrue(all(Controller._valid_event(e) for e in events))
         self.assertTrue(all(path.read_bytes() == b'{"state":"intent","synthetic":true}' for path in paths))
 
     def test_readonly_cancel_after_inflight_read_prevents_next_course(self):
@@ -216,7 +220,7 @@ class UpgradeTests(unittest.TestCase):
         with self.assertRaises(Cancelled):
             verify_chapters(client, channel, courses, targets)
         self.assertEqual(client.get_course_point.call_count, 1)
-        self.assertEqual(channel.output.getvalue(), '')
+        self.assertTrue(all(e['type'] == 'verification_progress' for e in map(json.loads, channel.output.getvalue().splitlines())))
 
     def test_verification_cannot_clear_unknown_records_or_replace_failure_with_success(self):
         self.b.operation = 'verify'

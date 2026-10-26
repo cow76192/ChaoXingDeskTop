@@ -66,11 +66,11 @@ def main():
                     item.setProperty('contentY', max(0, float(content) - item.height()))
             QTest.qWait(150)
             assert window.grabWindow().save(str(destination / f'matching-{width}.png'))
-        b.controller.active = True
+        b.controller.active = True; b.controller.busy_changed.emit(True)
         b.changed.emit()
         assert not threshold.isEnabled()
         assert not review.isEnabled()
-        b.controller.active = False
+        b.controller.active = False; b.controller.busy_changed.emit(False)
         b.changed.emit()
         assert b.save(), b.message
         assert not engine.load_warnings, engine.load_warnings

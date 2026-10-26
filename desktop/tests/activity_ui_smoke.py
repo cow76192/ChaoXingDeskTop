@@ -54,9 +54,9 @@ def main():
         for width, height in ((1440, 900), (980, 700)):
             window.setWidth(width); window.setHeight(height); QTest.qWait(150)
             assert window.grabWindow().save(str(destination / f'settings-{width}.png'))
-        b.controller.active = True; b.changed.emit()
+        b.controller.active = True; b.controller.busy_changed.emit(True); b.changed.emit()
         assert not find('activityPreviewButton').isEnabled()
-        b.controller.active = False; b.changed.emit()
+        b.controller.active = False; b.controller.busy_changed.emit(False); b.changed.emit()
         ctx = preview_context('文本固定好')
         answers = ActivityGenerator(AnswerRouter(to_payload(b.config), SimpleNamespace(control=None))).generate(ctx, b.config['activity'])
         record = safe_record(dict(id='activity-ui', run_id=b.controller.run_id, task_id='task', course='CourseA', chapter='章节',

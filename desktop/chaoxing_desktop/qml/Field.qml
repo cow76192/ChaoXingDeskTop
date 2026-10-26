@@ -40,7 +40,7 @@ ColumnLayout {
         Text { visible: field.spec.kind === "bool"; text: field.value.toLowerCase() === "true" ? "已启用" : "已关闭"; color: field.value.toLowerCase() === "true" ? "#15803d" : "#475569"; font.pixelSize: 12 }
         Switch {
             id: boolSwitch
-            enabled: !bridge.summary.busy && field.applicable
+            enabled: !bridge.busy && field.applicable
             visible: field.spec.kind === "bool"
             checked: field.value.toLowerCase() === "true"
             Accessible.name: field.spec.title
@@ -49,7 +49,7 @@ ColumnLayout {
     }
     RowLayout {
         visible: field.spec.kind !== "bool"
-        enabled: !bridge.summary.busy && field.applicable
+        enabled: !bridge.busy && field.applicable
         Layout.fillWidth: true
         Basic.TextField {
             id: edit
@@ -89,7 +89,7 @@ ColumnLayout {
         ActionButton { visible: field.spec.kind === "directory"; text: "选择目录"; onClicked: bridge.chooseLogDirectory() }
     }
     ScrollView {
-        enabled: !bridge.summary.busy && field.applicable
+        enabled: !bridge.busy && field.applicable
         visible: field.spec.kind === "multiline"
         Layout.fillWidth: true; Layout.preferredHeight: 140; clip: true
         TextArea {
@@ -101,8 +101,8 @@ ColumnLayout {
         }
     }
     Text {
-        visible: bridge.summary.busy || !field.applicable
-        text: bridge.summary.busy ? "运行中锁定，结束后可编辑" : field.dependency.reason + "；已填写的值保留"
+        visible: bridge.busy || !field.applicable
+        text: bridge.busy ? "运行中锁定，结束后可编辑" : field.dependency.reason + "；已填写的值保留"
         color: "#627086"; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true
     }
     Text {

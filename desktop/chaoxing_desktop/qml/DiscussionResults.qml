@@ -4,10 +4,11 @@ import QtQuick.Controls.Basic as Basic
 import QtQuick.Layouts
 
 ColumnLayout {
+    readonly property var workbenchSummary: bridge.summary
     id: pane
     property string selectedId: ""
     property var selected: {
-        let state = bridge.summary
+        let state = workbenchSummary
         return selectedId ? bridge.discussionDetail(selectedId) : ({})
     }
     function applyFilter() { bridge.filterDiscussions(search.text, statuses.currentValue || "") }
@@ -29,11 +30,11 @@ ColumnLayout {
     Text {
         Layout.fillWidth: true; wrapMode: Text.Wrap; color: "#627086"; font.pixelSize: 12
         text: {
-            let s = bridge.summary.discussionStats
-            return "记录 " + bridge.summary.discussionCount + " · 草稿 " + (s.draft || 0) + " · 本人已有回复 " + (s.existing || 0) +
-                " · 本轮发布确认 " + (s.published || 0) + " · 发布未知 " + (s.publish_unknown || 0) + " · 任务点确认 " + bridge.summary.discussionConfirmed +
+            let s = workbenchSummary.discussionStats
+            return "记录 " + workbenchSummary.discussionCount + " · 草稿 " + (s.draft || 0) + " · 本人已有回复 " + (s.existing || 0) +
+                " · 本轮发布确认 " + (s.published || 0) + " · 发布未知 " + (s.publish_unknown || 0) + " · 任务点确认 " + workbenchSummary.discussionConfirmed +
                 " · 待处理 " + (s.pending || 0) + "。发布与任务完成分开；成绩未知。" +
-                (bridge.summary.discussionEvicted ? " 已淘汰 " + bridge.summary.discussionEvicted + " 条旧显示记录。" : "")
+                (workbenchSummary.discussionEvicted ? " 已淘汰 " + workbenchSummary.discussionEvicted + " 条旧显示记录。" : "")
         }
     }
     ListView {
@@ -77,7 +78,7 @@ ColumnLayout {
                 }
             }
             ActionButton { text: "复制讨论正文"; enabled: !!pane.selected.content; onClicked: bridge.copyDiscussion(pane.selectedId) }
-            ActionButton { objectName: "editDiscussionCopy"; text: "编辑本地副本…"; tone: "connect"; enabled: pane.selected.stage === "draft" && !bridge.summary.busy; onClicked: { detail.close(); bridge.openDraftCopy("discussion", pane.selectedId) } }
+            ActionButton { objectName: "editDiscussionCopy"; text: "编辑本地副本…"; tone: "connect"; enabled: pane.selected.stage === "draft" && !workbenchSummary.busy; onClicked: { detail.close(); bridge.openDraftCopy("discussion", pane.selectedId) } }
         }
     }
 }

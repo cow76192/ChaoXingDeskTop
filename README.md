@@ -2,17 +2,17 @@
 
 面向 Windows 的超星课程学习工作台，用一个桌面窗口管理账号、课程、章节任务、题库与 AI 服务，以及逐题结果和日志。
 
-**当前版本：0.4.0（界面修订 1）** · **Windows 10 / 11 x64** · **Python + PySide6 / QML** · **GPL-3.0**
+**当前版本：0.4.1** · **Windows 10 / 11 x64** · **Python + PySide6 / QML** · **GPL-3.0**
 
-[下载安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.4.0/ChaoxingDesktop-0.4.0-Setup-win-x64.exe) · [发行说明](https://github.com/mikubob/ChaoXingDeskTop/releases/tag/v0.4.0) · [使用与构建指南](desktop/README.md) · [第三方声明](desktop/THIRD_PARTY_NOTICES.md)
+[下载安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.4.1/ChaoxingDesktop-0.4.1-Setup-win-x64.exe) · [发行说明](https://github.com/mikubob/ChaoXingDeskTop/releases/tag/v0.4.1) · [使用与构建指南](desktop/README.md) · [第三方声明](desktop/THIRD_PARTY_NOTICES.md)
 
 ## 下载与安装
 
 | 文件 | 用途 |
 | --- | --- |
-| [Windows x64 安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.4.0/ChaoxingDesktop-0.4.0-Setup-win-x64.exe) | 日常使用，已包含 Python 运行环境 |
-| [对应版本源码](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.4.0/ChaoxingDesktop-0.4.0-source.zip) | 查看实现、自行运行或构建 |
-| [SHA256 校验清单](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.4.0/ChaoxingDesktop-0.4.0-installer-SHA256.json) | 核对安装包及源码 ZIP 的完整性 |
+| [Windows x64 安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.4.1/ChaoxingDesktop-0.4.1-Setup-win-x64.exe) | 日常使用，已包含 Python 运行环境 |
+| [对应版本源码](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.4.1/ChaoxingDesktop-0.4.1-source.zip) | 查看实现、自行运行或构建 |
+| [SHA256 校验清单](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.4.1/ChaoxingDesktop-0.4.1-installer-SHA256.json) | 核对安装包及源码 ZIP 的完整性 |
 
 下载并运行安装包，按提示完成安装后，从桌面或开始菜单打开「超星桌面版」。首次使用可以直接选择「离线演示」，体验界面和任务流程。
 
@@ -47,6 +47,13 @@
 **0.3.8 新增讨论任务功能**：在「题库与 AI → 讨论任务」启用处理，选择精简、中等、详细或固定单字“好”；按需独立开启讨论自动提交。关闭提交时仅保存草稿，在「任务与日志 → 讨论记录」查看和复制。前三档复用 AI 服务；固定好不调用模型。新配置默认关闭讨论处理和提交。
 
 支持经章节 `insertbbs` 明确关联的新版超星讨论；非任务点、未知页面和无法核实本人回复时不自动发布。发布结果未知时保留记录，只读核验，不盲目重发。发布、任务点完成和成绩是三个不同结果。[讨论协议与边界](desktop/vendor/chaoxing/api/DISCUSSION_PROTOCOL.md)
+
+## 0.4.1 更新
+
+- 填空按真实命名空位逐一填写；AI 按空数返回答案，单空公式和区间文本保持原样。声明式题库可显式声明多空分隔符，布局、空数或保存响应异常时提供具体原因，缺空仍仅保存。
+- 只读核验减少重复刷新与章节读取，显示实际进度、读取次数和失败原因；大量记录下操作更流畅，停止及时响应。默认本人核验聚焦关联章节，新增明确的全量发现入口。
+- 清理未使用的待处理列表快照、重复章节索引和无用导入，保留现有功能与回归测试，未新增依赖。
+- hidden/editor 保存映射及完整卡片导航仍待真实页面证据；未知卡数时仍使用最多 7 卡兼容扫描，不将本地答案采用等同于平台保存成功。
 
 ## 0.4.0 界面修订 1
 

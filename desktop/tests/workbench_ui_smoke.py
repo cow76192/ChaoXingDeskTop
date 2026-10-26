@@ -133,7 +133,7 @@ def main():
         QTest.keyClick(window, Qt.Key_Escape)
         shot('07-attention-980')
 
-        b.controller.active = True
+        b.controller.active = True; b.controller.busy_changed.emit(True)
         b.on_event(dict(type='input', question=dict(type='text', title='长题干' * 400)))
         QTest.qWait(120)
         answer = find('manual_answer')
@@ -144,7 +144,7 @@ def main():
             QTest.keyClick(window, char)
         assert answer.property('text') == 'synthetic answer'
         shot('08-manual-long-980')
-        b.clear_input(); b.controller.active = False; b.changed.emit()
+        b.clear_input(); b.controller.active = False; b.controller.busy_changed.emit(False); b.changed.emit()
 
         path = output / 'diagnostics.ini'
         window.setProperty('pageIndex', 3)

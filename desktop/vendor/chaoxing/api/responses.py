@@ -48,7 +48,7 @@ def checked_page(response, page, course_id=None, clazz_id=None):
             for name in names:
                 field = soup.find('input', attrs={'name': name}) or soup.find('input', id=name)
                 if field and expected is not None and str(field.get('value', '')) != str(expected):
-                    raise PlatformResponseError('平台返回了其他课程的页面，请重新读取课程。')
+                    raise PlatformResponseError('平台返回了其他课程的页面，请重新读取课程。', 'identity_error')
     if not valid:
         raise PlatformResponseError('无法识别平台页面，可能是验证、维护或页面结构变化；未将其当作空数据。')
     return text

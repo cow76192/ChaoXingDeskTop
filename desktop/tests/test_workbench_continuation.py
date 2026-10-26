@@ -80,8 +80,8 @@ class ContinuationTests(unittest.TestCase):
         session.get.return_value = response
         client = Mock(spec_set=[])  # No get_job_list/study_emptypage can be called.
         with patch('api.base.SessionManager.get_session', return_value=session):
-            self.assertEqual(read_cards(client, self.channel(), dict(courseId='c', clazzId='l', cpi='fixture'), dict(id='synthetic-point')), [])
-        self.assertEqual(session.get.call_count, 7)
+            self.assertEqual(read_cards(client, self.channel(), dict(courseId='c', clazzId='l', cpi='fixture'), dict(id='synthetic-point'), indices=[0, 0]), [])
+        self.assertEqual(session.get.call_count, 1)
         self.assertTrue(all(c.kwargs['allow_redirects'] is False for c in session.get.call_args_list))
 
     def test_card_identity_unknown_login_and_business_failure_fail_closed(self):

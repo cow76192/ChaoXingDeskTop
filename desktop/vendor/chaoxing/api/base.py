@@ -945,6 +945,18 @@ class Chaoxing:
             random_answers = 0
             if hasattr(self.tiku, 'set_context'):
                 self.tiku.set_context(attempt=attempt)
+            # A dict form cannot represent colliding keys from different
+            # questions. Reject the complete affected layouts before adoption.
+            owners = {}
+            for q in questions['questions']:
+                if q['type'] == 'completion':
+                    q.pop('desktop_completion_parts', None)
+                    for field in q.get('completion_fields', []):
+                        owners.setdefault(field, []).append(q)
+            for group in owners.values():
+                if len(group) > 1:
+                    for q in group:
+                        q['completion_layout'] = dict(supported=False, reason='多题填空字段重名，无法安全序列化')
             answers = self.tiku.query_all(questions["questions"], query_delay=query_delay)
 
             if not isinstance(answers, list):
@@ -959,6 +971,10 @@ class Chaoxing:
             for q, res in zip(questions["questions"], answers):
                 logger.debug(f"当前题目信息 -> {q}")
                 answer = ""
+                # Redo/reused page objects must never retain stale blank values.
+                if q['type'] == 'completion':
+                    for field in q.get('completion_fields', []):
+                        q['answerField'][field] = ''
                 if not res:
                     # Desktop keeps unresolved questions empty for review.
                     answer = ""
@@ -972,10 +988,10 @@ class Chaoxing:
                     elif q["type"] == "judgement":
                         answer = "true" if self.tiku.judgement_select(res) else "false"
                     elif q["type"] == "completion":
-                        from chaoxing_desktop.completion import completion_parts
+                        from chaoxing_desktop.completion import completion_parts, layout_error
                         fields = q.get('completion_fields', [])
-                        parts = completion_parts(res, q.get('blank_count'))
-                        if parts and len(fields) == len(parts):
+                        parts = completion_parts(q.get('desktop_completion_parts', res), q.get('blank_count'))
+                        if parts and len(fields) == len(parts) and len(set(fields)) == len(fields) and not layout_error(q):
                             q['answerField'].update(zip(fields, parts))
                             answer = parts[0] if len(parts) == 1 and fields[0] == f'answer{q["id"]}' else '已按空位填写'
                         else:
@@ -1014,29 +1030,17 @@ class Chaoxing:
                 questions["pyFlag"] = "1"
                 logger.info("仍有未解决题目，已保存可用答案，等待人工处理")
             checkpoint(self)
-            # Named completion inputs are copied exactly as observed in the form.
+            # Copy only actual named completion fields; never invent an empty
+            # aggregate answer{id} alongside a different observed protocol.
             for q in questions['questions']:
-                for field in q.get('completion_fields', []):
-                    if field in q['answerField']:
-                        questions[field] = q['answerField'][field]
-            # 组建提交表单
-            if questions["pyFlag"] == "1":
-                for q in questions["questions"]:
-                    questions.update(
-                        {
-                            f'answer{q["id"]}':
-                                q["answerField"][f'answer{q["id"]}'] if q[f'answerSource{q["id"]}'] in ("cover", "random") else '',
-                            f'answertype{q["id"]}': q["answerField"][f'answertype{q["id"]}'],
-                        }
-                    )
-            else:
-                for q in questions["questions"]:
-                    questions.update(
-                        {
-                            f'answer{q["id"]}': q["answerField"][f'answer{q["id"]}'],
-                            f'answertype{q["id"]}': q["answerField"][f'answertype{q["id"]}'],
-                        }
-                    )
+                questions[f'answertype{q["id"]}'] = q['answerField'][f'answertype{q["id"]}']
+                if q['type'] == 'completion':
+                    from chaoxing_desktop.completion import layout_error
+                    if not layout_error(q):
+                        for field in q.get('completion_fields', []):
+                            questions[field] = q['answerField'].get(field, '')
+                else:
+                    questions[f'answer{q["id"]}'] = q['answerField'][f'answer{q["id"]}']
 
             del questions["questions"]
 
@@ -1062,11 +1066,17 @@ class Chaoxing:
                 },
             )
             if res.status_code == 200:
-                res_json = res.json()
-                if res_json["status"]:
-                    logger.info(f'{"提交" if questions["pyFlag"] == "" else "保存"}答题成功 -> {res_json["msg"]}')
+                try:
+                    res_json = res.json()
+                    if not isinstance(res_json, dict) or type(res_json.get('status')) is not bool:
+                        raise ValueError
+                except (ValueError, TypeError):
+                    logger.error('答题保存／提交响应不可读，平台结果未确认；答案采用不代表平台保存成功')
+                    return StudyResult.ERROR
+                if res_json['status']:
+                    logger.info(f'{"提交" if questions["pyFlag"] == "" else "保存"}答题成功 -> {res_json.get("msg", "平台已确认")}')
                 else:
-                    logger.error(f'{"提交" if questions["pyFlag"] == "" else "保存"}答题失败 -> {res_json["msg"]}')
+                    logger.error(f'{"提交" if questions["pyFlag"] == "" else "保存"}答题失败 -> {res_json.get("msg", "平台拒绝")}')
                     return StudyResult.ERROR
             else:
                 logger.error(f'{"提交" if questions["pyFlag"] == "" else "保存"}答题失败 -> {res.text}')
@@ -1079,6 +1089,7 @@ class Chaoxing:
             # 6. 提交后检查成绩：若未全部正确，则收集错误反馈并重新作答提交
             result_info = self._check_work_result(_session, _course, _job, _job_info, questions)
             if result_info is None:
+                logger.warning('平台已接受提交，但成绩读取未确认；请在平台核对成绩与章节状态。')
                 # 无法获取成绩详情（如接口异常），按原行为返回成功，避免误判失败
                 return StudyResult.SUCCESS
 

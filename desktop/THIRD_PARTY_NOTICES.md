@@ -1,6 +1,8 @@
 # 来源与许可
 
-桌面版：ChaoxingDesktop 0.4.0，GPL-3.0。完整许可见 LICENSE。
+桌面版：ChaoxingDesktop 0.4.1，GPL-3.0。完整许可见 LICENSE。
+
+0.4.1 独立实现填空布局与逐空校验、来源分隔符声明、保存诊断和只读核验增量刷新／进度／失败恢复；平台适配改动位于 api/base.py、api/decode.py、api/activity.py、api/discussion.py、api/responses.py。移除无调用的列表快照、重复章节索引与无用导入；未新增第三方代码或依赖。
 
 0.4.0 界面修订 1：独立实现通用操作弹框、语义按钮和分操作提示，改进空态／失败／未保存反馈；未新增依赖或第三方代码，未修改 vendor 协议。
 

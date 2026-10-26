@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 ScrollView {
+    readonly property var workbenchSummary: bridge.summary
     id: page
     objectName: "discussionSettings"
     clip: true; contentWidth: availableWidth
@@ -38,14 +39,14 @@ ScrollView {
                 TextArea {
                     id: topic; objectName: "discussionPreviewTopic"
                     text: "如何理解中国式现代化的中国特色？大学生如何为中国式现代化做贡献？"
-                    enabled: !bridge.summary.busy; wrapMode: TextEdit.Wrap; selectByMouse: true
+                    enabled: !workbenchSummary.busy; wrapMode: TextEdit.Wrap; selectByMouse: true
                     textFormat: TextEdit.PlainText; color: "#17243a"; Accessible.name: "示例讨论主题"
                 }
             }
             ActionButton {
                 objectName: "discussionPreviewButton"
                 text: bridge.values.discussion.reply_level === "fixed_good" ? "本地预览固定好" : "生成 AI 预览"
-                tone: "connect"; enabled: !bridge.summary.busy
+                tone: "connect"; enabled: !workbenchSummary.busy
                 onClicked: bridge.previewDiscussion(topic.text)
             }
             Text { text: bridge.discussionPreview.reason; color: "#627086"; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true; textFormat: Text.PlainText }

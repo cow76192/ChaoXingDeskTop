@@ -9,7 +9,7 @@ TEMPLATE = dict(version=1, name='我的 JSON 题库', url='https://example.test/
                 data={'question': '${title}', 'options': '${options}', 'type': '${type}'},
                 results_path='data', answer_path='answer', title_path='question', options_path='options',
                 type_map={})
-KEYS = set(TEMPLATE)
+KEYS = set(TEMPLATE) | {'completion_separator'}
 ENV_KEYS = {'title', 'options', 'type', 'token'}
 
 
@@ -41,7 +41,7 @@ def preview_definition(text):
                 variables = re.findall(r'\$\{(title|options|type|token)\}', value) if isinstance(value, str) else []
                 lines.append(kind + '[' + str(key)[:80] + '] ← ' + (', '.join(variables) or '固定值 / 非法结构'))
     lines.append('响应映射：')
-    for key in ('results_path', 'answer_path', 'title_path', 'options_path', 'type_map'):
+    for key in ('results_path', 'answer_path', 'title_path', 'options_path', 'type_map', 'completion_separator'):
         lines.append(key + ' ← ' + json.dumps(raw.get(key, ''), ensure_ascii=False)[:400])
     lines.append('拒绝的脚本／扩展字段：' + (', '.join(k[:80] for k in rejected[:24]) or '无'))
     lines.append('校验：' + (error if error else '通过；确认后替换当前声明式定义。'))
@@ -83,6 +83,9 @@ def validate_definition(text):
     if not isinstance(definition.get('name', ''), str) or len(definition.get('name', '')) > 80:
         raise ValueError('题库名称无效')
     mapping = definition.get('type_map', {})
+    separator = definition.get('completion_separator', '')
+    if not isinstance(separator, str) or len(separator) > 16 or (separator and not separator.strip() and separator != '\n'):
+        raise ValueError('填空分隔符必须为 1–16 字符，可使用换行；留空表示不拆分')
     if not isinstance(mapping, dict) or any(k not in ('single', 'multiple', 'judgement', 'completion', 'shortanswer') or type(v) not in (str, int) for k, v in mapping.items()):
         raise ValueError('题型映射无效')
     for key in ('headers', 'data'):
@@ -146,6 +149,11 @@ class DeclarativeBank:
         from .query_result import AnswerCandidate
         for row in rows:
             answer = path_value(row, self.definition['answer_path'])
+            separator = self.definition.get('completion_separator', '')
+            if (question.get('type') == 'completion' and isinstance(answer, str) and separator
+                    and type(question.get('blank_count')) is int and question['blank_count'] > 1):
+                # This is a source contract, not a global delimiter heuristic.
+                answer = answer.split(separator)
             if isinstance(answer, list) and all(isinstance(x, str) for x in answer):
                 answer = json.dumps(answer, ensure_ascii=False) if question.get('type') == 'completion' else '\n'.join(answer)
             if not isinstance(answer, str):

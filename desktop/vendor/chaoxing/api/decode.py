@@ -604,15 +604,38 @@ def _process_question(div_tag, font_decoder=None) -> Dict[str, Any]:
     q_options = '\n'.join(q_options)
 
     completion_fields = []
+    layout = dict(question_id=question_id, protocol='unsupported', supported=False,
+                  blanks=[], reason='未发现带真实 name 的填空字段；仅 id／编辑器容器不能证明提交映射')
     if q_type == 'completion' and question_id:
+        unsupported = False
         for field in div_tag.find_all(['textarea', 'input']):
             name = field.get('name', '')
-            if (field.name == 'textarea' or field.get('type', 'text').lower() == 'text') and re.fullmatch(r'answer' + re.escape(question_id) + r'(?:[_-]?\d+)?', name):
+            if (not field.has_attr('disabled') and (field.name == 'textarea' or field.get('type', 'text').lower() == 'text')
+                    and re.fullmatch(r'answer' + re.escape(question_id) + r'(?:[_-]?\d+)?', name)):
                 if name in completion_fields:
-                    completion_fields = []
-                    break  # Repeated field names require a separate array protocol.
+                    layout['reason'] = '同名多空字段需要重复键协议证据，当前不支持'
+                    unsupported = True
+                    break
                 completion_fields.append(name)
+                layout['blanks'].append(dict(order=len(completion_fields), editor_id=field.get('id', ''),
+                                              field=name, existing=field.get_text() if field.name == 'textarea' else field.get('value', '')))
+        # An unmapped editor next to mapped fields can represent additional
+        # blanks or an aggregate protocol. Do not silently count only a subset.
+        editors = div_tag.select('[contenteditable="true"], script[type="text/plain"], iframe')
+        unknown_fields = [f for f in div_tag.find_all(['textarea', 'input'])
+                          if not f.has_attr('disabled') and (f.name == 'textarea' or f.get('type', 'text').lower() == 'text')
+                          and f.get('name', '') not in completion_fields]
+        hidden = [f for f in div_tag.select('input[type="hidden"][name]')
+                  if re.fullmatch(r'answer' + re.escape(question_id) + r'(?:[_-]?\d+)?', f['name'])]
+        if editors or unknown_fields or hidden:
+            unsupported = True
+            layout['reason'] = '编辑器／隐藏答案／未映射输入的提交关联未知，未将部分字段当作完整空位'
+        if completion_fields and not unsupported and len(completion_fields) <= 100:
+            layout.update(protocol='named_inputs', supported=True, reason='')
+        else:
+            completion_fields = []
     return {
+        'completion_layout': layout if q_type == 'completion' else None,
         'blank_count': len(completion_fields) or None,
         'completion_fields': completion_fields,
         "id": question_id,

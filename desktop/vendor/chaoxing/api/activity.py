@@ -177,7 +177,7 @@ class ActivityAdapter:
             raise PlatformResponseError('活动详情页面变体尚未适配。')
         for key, expected in (('activeId', native_id), ('courseId', course['courseId']), ('classId', course['clazzId'])):
             if query.get(key) != [str(expected)]:
-                raise PlatformResponseError('活动详情返回了其他课程、班级或活动。')
+                raise PlatformResponseError('活动详情返回了其他课程、班级或活动。', 'identity_error')
         soup = BeautifulSoup(text, 'lxml')
         actor = soup.select_one('input[name="puid"]')
         if actor and actor.get('value') != uid:

@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 ApplicationWindow {
+    readonly property var workbenchSummary: bridge.summary
     id: window
     objectName: "mainWindow"
     width: 1280; height: 860; minimumWidth: 980; minimumHeight: 700
@@ -38,7 +39,7 @@ ApplicationWindow {
         title: "退出前保存未完成"; modal: true; width: Math.min(550, window.width - 60); height: Math.min(370, window.height - 50)
         primaryText: "放弃修改并退出"; primaryTone: "danger"; cancelText: "返回修正"; autoAccept: false
         contentItem: ColumnLayout {
-            NoticeBanner { message: bridge.summary.message; tone: "danger"; Layout.fillWidth: true }
+            NoticeBanner { message: workbenchSummary.message; tone: "danger"; Layout.fillWidth: true }
             Label { text: "返回修正后可再次保存。放弃会停止后台并退出，磁盘上的原设置保留。"; wrapMode: Text.Wrap; Layout.fillWidth: true }
             Item { Layout.fillHeight: true }
         }
@@ -102,17 +103,17 @@ ApplicationWindow {
                     Text { text: window.pages[window.pageIndex].title; font.pixelSize: 26; font.bold: true; color: "#17243a"; Layout.fillWidth: true }
                     Text { visible: window.width >= 1100; text: window.pages[window.pageIndex].description; font.pixelSize: 12; color: "#627086"; Layout.fillWidth: true; elide: Text.ElideRight }
                 }
-                BusyIndicator { visible: bridge.summary.busy; running: visible; Layout.preferredWidth: 28; Layout.preferredHeight: 28 }
-                Text { text: bridge.summary.mode; font.pixelSize: 12; color: bridge.summary.demo ? "#7c3aed" : "#627086"; Layout.maximumWidth: 160; elide: Text.ElideRight }
+                BusyIndicator { visible: workbenchSummary.busy; running: visible; Layout.preferredWidth: 28; Layout.preferredHeight: 28 }
+                Text { text: workbenchSummary.mode; font.pixelSize: 12; color: workbenchSummary.demo ? "#7c3aed" : "#627086"; Layout.maximumWidth: 160; elide: Text.ElideRight }
                 }
                 RowLayout {
                 Layout.alignment: Qt.AlignRight
-                ActionButton { visible: bridge.summary.busy; text: bridge.summary.paused ? "恢复" : "暂停后续"; enabled: !bridge.summary.stopping; onClicked: bridge.pause() }
-                ActionButton { visible: bridge.summary.busy; text: bridge.summary.stopping ? "停止中…" : "停止任务"; tone: "danger"; glyph: "stop"; enabled: !bridge.summary.stopping; onClicked: bridge.stop() }
-                ActionButton { text: "保存设置"; tone: "save"; glyph: "save"; enabled: !bridge.summary.busy; onClicked: bridge.save() }
+                ActionButton { visible: workbenchSummary.busy; text: workbenchSummary.paused ? "恢复" : "暂停后续"; enabled: !workbenchSummary.stopping; onClicked: bridge.pause() }
+                ActionButton { visible: workbenchSummary.busy; text: workbenchSummary.stopping ? "停止中…" : "停止任务"; tone: "danger"; glyph: "stop"; enabled: !workbenchSummary.stopping; onClicked: bridge.stop() }
+                ActionButton { text: "保存设置"; tone: "save"; glyph: "save"; enabled: !workbenchSummary.busy; onClicked: bridge.save() }
                 }
             }
-            NoticeBanner { objectName: "globalNotice"; Layout.fillWidth: true; message: bridge.summary.message; tone: bridge.summary.tone; maximumHeight: 100 }
+            NoticeBanner { objectName: "globalNotice"; Layout.fillWidth: true; message: workbenchSummary.message; tone: workbenchSummary.tone; maximumHeight: 100 }
             StackLayout {
                 Layout.fillWidth: true; Layout.fillHeight: true; currentIndex: window.pageIndex
                 CoursesPage {}
@@ -123,10 +124,10 @@ ApplicationWindow {
             }
             RowLayout {
                 Layout.fillWidth: true
-                Rectangle { width: 7; height: 7; radius: 4; color: bridge.summary.saveState.indexOf("失败") >= 0 ? "#dc2626" : bridge.summary.saveState.indexOf("未保存") >= 0 ? "#b45309" : "#15803d" }
-                Text { text: bridge.summary.saveState; color: "#627086"; font.pixelSize: 11 }
+                Rectangle { width: 7; height: 7; radius: 4; color: workbenchSummary.saveState.indexOf("失败") >= 0 ? "#dc2626" : workbenchSummary.saveState.indexOf("未保存") >= 0 ? "#b45309" : "#15803d" }
+                Text { text: workbenchSummary.saveState; color: "#627086"; font.pixelSize: 11 }
                 Item { Layout.fillWidth: true }
-                Text { text: bridge.summary.demo ? "离线演示 · 所有课程与任务均为示例" : "学习工作台 · Qt Quick"; color: "#627086"; font.pixelSize: 11 }
+                Text { text: workbenchSummary.demo ? "离线演示 · 所有课程与任务均为示例" : "学习工作台 · Qt Quick"; color: "#627086"; font.pixelSize: 11 }
             }
         }
     }

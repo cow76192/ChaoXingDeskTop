@@ -62,6 +62,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Performance budget exceeded' }
           .venv-ci/Scripts/python.exe tests/performance_smoke.py --attention --tasks 10000 --events 1000 --questions 2500 --rounds 3 --max-round-seconds 20 --max-heartbeat-p95-ms 500 --output build/ci-checks/performance-attention.json
           if ($LASTEXITCODE -ne 0) { throw 'Pending-items performance budget exceeded' }
+          .venv-ci/Scripts/python.exe tests/verification_performance_smoke.py --max-heartbeat-p95-ms 500 --max-heartbeat-ms 1000 --max-stop-gui-ms 500 --output build/ci-checks/verification-performance.json
+          if ($LASTEXITCODE -ne 0) { throw 'Verification delivery or responsiveness regression' }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

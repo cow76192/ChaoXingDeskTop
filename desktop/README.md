@@ -1,8 +1,8 @@
 # 桌面版使用与开发指南
 
-**版本：0.4.0（界面修订 1）** · Windows 10 / 11 x64 · Python + PySide6 / QML · GPL-3.0
+**版本：0.4.1** · Windows 10 / 11 x64 · Python + PySide6 / QML · GPL-3.0
 
-[项目首页](../README.md) · [下载安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/tag/v0.4.0) · [第三方声明](THIRD_PARTY_NOTICES.md)
+[项目首页](../README.md) · [下载安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/tag/v0.4.1) · [第三方声明](THIRD_PARTY_NOTICES.md)
 
 本文中的命令默认在 `desktop` 目录的 PowerShell 中执行。
 
@@ -38,7 +38,7 @@
 
 题库按顺序查询，AI 补全未解决的题目，人工补全处理剩余答案。随机补全默认关闭，开启后仅处理仍未解决的单选、多选和判断题。
 
-默认只保存答案。自动提交需独立开启，并要求所有题目已有答案；仍有空白题目时仅保存。填空按平台可确认的空位逐一对应，多空答案使用 JSON 字符串数组。
+默认只保存答案。自动提交需独立开启，并要求所有题目已有答案；仍有空白题目时仅保存。填空按真实命名空位逐一对应，多空答案使用 JSON 字符串数组。声明式题库可选 `completion_separator`（1–16 字符），仅在来源明确约定时拆分多空答案；未声明时不猜测分隔符。AI 按 `blank_count` 逐空作答，空数、布局、段数与保存响应异常分别诊断。未知 hidden/editor 映射保留待处理。
 
 ### 4. 进度与任务控制
 
@@ -64,6 +64,20 @@
 - **完整 INI 导出包含当前明文密码和密钥，应留在本机。** 保存失败或检测到其他进程修改时保留原文件，不覆盖更新状态。
 - 日志先脱敏再显示与写盘，单文件约 10 MiB、总量约 100 MiB、保留 14 天。删除仅处理本应用命名的普通日志。
 - 同一数据目录仅运行一个主窗口，重复启动会唤起已有窗口。界面日志、逐题结果及后台队列有容量限制。
+
+## 0.4.1 填空与只读核验修复
+
+只读核验合并界面摘要通知并增量维护统计，减少大量记录时的阻塞；后台事件按时间预算交付，保留停止与末尾事件。界面显示章节、章节／卡片读取次数、失败与耗时，局部网络失败可继续其他目标，会话或身份失效时停止。
+
+默认「核验本人讨论／活动」复核待处理或已有关联记录的章节，可复用已观察卡号但重新读取证据；「全量发现本人记录」扫描可定位章节。未知卡数仍最多扫描 7 卡，尚未验证所有真实平台导航与 hidden/editor 保存协议。本人证据、任务点与章节状态分别判断，未决意图不会被清除。
+
+清理无调用的 `attentionRows` 全量快照属性，使用现有 `attentionModel`；合并重复章节索引，移除图标脚本和测试中的无用导入。动态 Qt/QML 入口、worker 通知导出、打包钩子、vendor 功能、资源及全部测试保留；依赖版本未变。
+
+新增回归位于 `tests/test_completion_verification_repairs.py`，真实 QML＋QProcess/Controller 离线压力与停止检查可运行：
+
+```powershell
+.venv-build/Scripts/python.exe tests/verification_performance_smoke.py --output build/verification-performance.json
+```
 
 ## 弹框与提示（0.4.0 界面修订 1）
 
@@ -143,19 +157,19 @@ python -m venv .venv-build
 ### 构建程序
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -OutputDirectory dist/release-0.4.0/ChaoxingDesktop
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -OutputDirectory dist/release-0.4.1/ChaoxingDesktop
 ```
 
 构建脚本会准备 `.venv-build`、安装锁定依赖并核对依赖闭包，随后运行单元与源码界面回归、执行 PyInstaller，最后验收冻结 worker 与 QML 界面。
 
-程序输出至 `dist/release-0.4.0/ChaoxingDesktop/`。可通过 `-Wheelhouse <绝对路径>` 使用完整的本地 wheel 目录离线安装。依赖更新需要重新生成、审阅锁文件，并在干净环境中验证。
+程序输出至 `dist/release-0.4.1/ChaoxingDesktop/`。可通过 `-Wheelhouse <绝对路径>` 使用完整的本地 wheel 目录离线安装。依赖更新需要重新生成、审阅锁文件，并在干净环境中验证。
 
 ### 生成安装包
 
 准备 [NSIS 编译器](https://nsis.sourceforge.io/Download)，将下方路径替换为本机的 `makensis.exe`：
 
 ```powershell
-.venv-build/Scripts/python.exe scripts/build_installer.py --app dist/release-0.4.0/ChaoxingDesktop --compiler "C:/Tools/NSIS/makensis.exe"
+.venv-build/Scripts/python.exe scripts/build_installer.py --app dist/release-0.4.1/ChaoxingDesktop --compiler "C:/Tools/NSIS/makensis.exe"
 ```
 
 产物默认写入项目根目录的 `release/`：

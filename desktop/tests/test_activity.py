@@ -3,7 +3,6 @@ import copy
 import io
 import json
 from pathlib import Path
-import random
 import sys
 import tempfile
 import threading
@@ -16,7 +15,7 @@ from api.activity import ActivityAdapter, ActivityContext, parse_questions, trus
 from api.decode import decode_course_card
 from api.responses import PlatformResponseError
 from chaoxing_desktop.activity import (ActivityGenerator, ActivityRunner, ActivityOutcome, preview_context,
-                                      random_options, validate_answer, structure_digest)
+                                      random_options, structure_digest)
 from chaoxing_desktop.activity_model import ActivityModel, safe_record, valid_record
 from chaoxing_desktop.activity_store import ActivityStore, activity_key
 from chaoxing_desktop.answers import AnswerRouter, AIError

@@ -4,6 +4,7 @@ import QtQuick.Controls.Basic as Basic
 import QtQuick.Layouts
 
 ColumnLayout {
+    readonly property var workbenchSummary: bridge.summary
     id: page
     property bool logsOpen: false
     property bool followLogs: true
@@ -22,7 +23,7 @@ ColumnLayout {
                 Column {
                     anchors { left: parent.left; top: parent.top; margins: 16 } spacing: 8
                     Text { text: modelData.label; font.pixelSize: 12; color: "#627086" }
-                    Text { text: bridge.summary[modelData.key]; font.pixelSize: 28; font.bold: true; color: modelData.color }
+                    Text { text: workbenchSummary[modelData.key]; font.pixelSize: 28; font.bold: true; color: modelData.color }
                 }
             }
         }
@@ -31,11 +32,11 @@ ColumnLayout {
         Layout.fillWidth: true
         Text { text: "本轮处理进度"; color: "#34435a"; font.pixelSize: 13 }
         Basic.ProgressBar {
-            id: totalBar; Layout.fillWidth: true; Layout.preferredHeight: 10; value: bridge.summary.progress / 100
+            id: totalBar; Layout.fillWidth: true; Layout.preferredHeight: 10; value: workbenchSummary.progress / 100
             background: Rectangle { color: "#cbd5e1"; radius: 5 }
             contentItem: Item { Rectangle { width: parent.width * totalBar.visualPosition; height: parent.height; color: "#2563eb"; radius: 5 } }
         }
-        Text { text: bridge.summary.progress + "%"; font.bold: true; color: "#2563eb" }
+        Text { text: workbenchSummary.progress + "%"; font.bold: true; color: "#2563eb" }
     }
     Text { text: "按章节统计，同一章节可含多个任务点；处理进度 100% 表示本轮结束，待完成 / 未核验章节请在平台确认。"; Layout.fillWidth: true; wrapMode: Text.Wrap; color: "#627086"; font.pixelSize: 12 }
     Text { text: "本次操作 AI 请求 " + bridge.aiUsage.requests + " / " + (bridge.aiUsage.limit || "不限") + " · 服务返回 token " + bridge.aiUsage.tokens + "（" + bridge.aiUsage.known + " 次有 usage，" + bridge.aiUsage.unknown + " 次用量未知）· 不等于账单或正确率"; color: "#627086"; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true }
@@ -51,18 +52,18 @@ ColumnLayout {
                     TabBar {
                         id: resultTabs; objectName: "resultTabs"; Layout.fillWidth: true
                         TabButton { text: "章节任务" }
-                        TabButton { text: "逐题结果（" + bridge.summary.questionCount + "）" }
-                        TabButton { text: "讨论记录（" + bridge.summary.discussionCount + "）" }
-                        TabButton { text: "投票／问卷（" + bridge.summary.activityCount + "）" }
+                        TabButton { text: "逐题结果（" + workbenchSummary.questionCount + "）" }
+                        TabButton { text: "讨论记录（" + workbenchSummary.discussionCount + "）" }
+                        TabButton { text: "投票／问卷（" + workbenchSummary.activityCount + "）" }
                         TabButton { objectName: "attentionTab"; text: "需处理" }
                     }
-                    Text { text: bridge.summary.busy ? "运行中" : "当前任务"; font.pixelSize: 12; color: "#627086" }
+                    Text { text: workbenchSummary.busy ? "运行中" : "当前任务"; font.pixelSize: 12; color: "#627086" }
                 }
                 RowLayout {
                     Layout.fillWidth: true
                     ActionButton { objectName: "history_button"; text: "运行摘要"; onClicked: { bridge.loadRunHistory(); history.open() } }
-                    ActionButton { objectName: "recovery_button"; text: "从摘要选课…"; enabled: !bridge.summary.busy; onClicked: { bridge.clearUiFeedback("recovery"); bridge.loadRunHistory(); recovery.open() } }
-                    ActionButton { objectName: "saved_drafts_button"; text: "本地副本…"; enabled: !bridge.summary.busy; onClicked: { bridge.clearUiFeedback("savedDrafts"); savedDrafts.rows = bridge.listDraftCopies(); savedDrafts.open() } }
+                    ActionButton { objectName: "recovery_button"; text: "从摘要选课…"; enabled: !workbenchSummary.busy; onClicked: { bridge.clearUiFeedback("recovery"); bridge.loadRunHistory(); recovery.open() } }
+                    ActionButton { objectName: "saved_drafts_button"; text: "本地副本…"; enabled: !workbenchSummary.busy; onClicked: { bridge.clearUiFeedback("savedDrafts"); savedDrafts.rows = bridge.listDraftCopies(); savedDrafts.open() } }
                     ActionButton { objectName: "capacity_button"; text: "容量…"; onClicked: capacity.open() }
                     Text { visible: !!bridge.historyError; text: bridge.historyError; color: "#b42323"; wrapMode: Text.Wrap; font.pixelSize: 12; Layout.fillWidth: true }
                 }
@@ -127,7 +128,7 @@ ColumnLayout {
                     ActionButton { text: "导出保留日志"; tone: "save"; subtle: true; onClicked: bridge.fileAction("export_logs") }
                     ActionButton { text: page.logsOpen ? "收起" : "展开"; onClicked: page.logsOpen = !page.logsOpen }
                 }
-                Text { visible: page.logsOpen; text: bridge.summary.logSaveError || ("保存目录：" + bridge.summary.logDirectory); color: bridge.summary.logSaveError ? "#fca5a5" : "#e2e8f0"; Layout.fillWidth: true; elide: Text.ElideMiddle; font.pixelSize: 12 }
+                Text { visible: page.logsOpen; text: workbenchSummary.logSaveError || ("保存目录：" + workbenchSummary.logDirectory); color: workbenchSummary.logSaveError ? "#fca5a5" : "#e2e8f0"; Layout.fillWidth: true; elide: Text.ElideMiddle; font.pixelSize: 12 }
                 RowLayout {
                     visible: page.logsOpen; Layout.fillWidth: true
                     Basic.TextField { id: logSearch; objectName: "logSearch"; Layout.fillWidth: true; placeholderText: "搜索当前保留日志"; Accessible.name: "搜索日志"; onTextEdited: logFilterTimer.restart() }
@@ -174,11 +175,11 @@ ColumnLayout {
         padding: 18
         background: Rectangle { color: "white"; radius: 12; border.color: "#cdd7e6" }
         primaryText: "打开所选副本"; cancelText: "关闭"; autoAccept: false
-        primaryEnabled: savedDraft.currentIndex >= 0 && rows.length > 0 && !bridge.summary.busy && (bridge.uiFeedback.savedDrafts || {}).tone !== "danger"
+        primaryEnabled: savedDraft.currentIndex >= 0 && rows.length > 0 && !workbenchSummary.busy && (bridge.uiFeedback.savedDrafts || {}).tone !== "danger"
         contentItem: ColumnLayout {
             Label { text: "最多 20 项 / 2 MiB，容量满不自动丢弃人工编辑。来源未在当前轮确认时只读，可复制或导出。这里不会改变提交去重记录。"; Layout.fillWidth: true; wrapMode: Text.Wrap }
             ChoiceBox { id: savedDraft; Layout.fillWidth: true; enabled: savedDrafts.rows.length > 0; model: savedDrafts.rows; textRole: "title"; valueRole: "id"; Accessible.name: "选择人工副本" }
-            ActionButton { objectName: "deleteSavedDraft"; text: "删除所选人工副本…"; tone: "danger"; subtle: true; enabled: savedDraft.currentIndex >= 0 && savedDrafts.rows.length > 0 && !bridge.summary.busy && (bridge.uiFeedback.savedDrafts || {}).tone !== "danger"; onClicked: { deleteDraft.copyId = savedDraft.currentValue; deleteDraft.copyVersion = savedDrafts.rows[savedDraft.currentIndex].version; deleteDraft.copyTitle = savedDrafts.rows[savedDraft.currentIndex].title; deleteDraft.open() } }
+            ActionButton { objectName: "deleteSavedDraft"; text: "删除所选人工副本…"; tone: "danger"; subtle: true; enabled: savedDraft.currentIndex >= 0 && savedDrafts.rows.length > 0 && !workbenchSummary.busy && (bridge.uiFeedback.savedDrafts || {}).tone !== "danger"; onClicked: { deleteDraft.copyId = savedDraft.currentValue; deleteDraft.copyVersion = savedDrafts.rows[savedDraft.currentIndex].version; deleteDraft.copyTitle = savedDrafts.rows[savedDraft.currentIndex].title; deleteDraft.open() } }
             NoticeBanner { visible: !savedDrafts.rows.length && (bridge.uiFeedback.savedDrafts || {}).tone !== "danger"; message: "当前账号没有保存的编辑副本。请先从讨论或问卷草稿中创建并保存本地副本。"; Layout.fillWidth: true }
             OperationNotice { objectName: "savedDraftsNotice"; scope: "savedDrafts"; Layout.fillWidth: true }
             Item { Layout.fillHeight: true }
@@ -204,7 +205,7 @@ ColumnLayout {
         padding: 18
         background: Rectangle { color: "white"; radius: 12; border.color: "#cdd7e6" }
         primaryText: "重新读课并选课"; autoAccept: false
-        primaryEnabled: recoveryRun.currentIndex >= 0 && bridge.runHistory.length > 0 && !bridge.historyError && !bridge.summary.busy
+        primaryEnabled: recoveryRun.currentIndex >= 0 && bridge.runHistory.length > 0 && !bridge.historyError && !workbenchSummary.busy
         contentItem: ColumnLayout {
             Label { text: "先连接原账号，再重新读取身份与课程。仅选择摘要中可定位的未完成课程；不会启动任务或重放旧写请求。请检查策略后手动开始新轮。"; wrapMode: Text.Wrap; Layout.fillWidth: true }
             ChoiceBox { id: recoveryRun; objectName: "recoveryRun"; Layout.fillWidth: true; enabled: bridge.runHistory.length > 0; model: bridge.runHistory; textRole: "time"; valueRole: "id"; Accessible.name: "选择运行摘要" }
@@ -236,7 +237,7 @@ ColumnLayout {
         id: deleteLogsDialog; objectName: "deleteLogsDialog"; parent: Overlay.overlay; anchors.centerIn: parent; modal: true
         title: "删除当前目录的应用日志？"; width: Math.min(540, page.width); height: 260
         primaryText: "删除日志文件"; primaryTone: "danger"
-        contentItem: NoticeBanner { tone: "warning"; message: "将删除下列目录中由本应用命名的日志文件，并清空当前显示。此操作无法撤销。\n\n" + bridge.summary.logDirectory }
+        contentItem: NoticeBanner { tone: "warning"; message: "将删除下列目录中由本应用命名的日志文件，并清空当前显示。此操作无法撤销。\n\n" + workbenchSummary.logDirectory }
         onAccepted: bridge.deleteLogs()
     }
 }

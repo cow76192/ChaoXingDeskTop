@@ -1,4 +1,4 @@
 """Chaoxing desktop application."""
 
-__version__ = "0.4.0"
-__revision__ = "界面修订 1"
+__version__ = "0.4.1"
+__revision__ = "正式版"

@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 ScrollView {
+    readonly property var workbenchSummary: bridge.summary
     id: page
     objectName: "activitySettings"
     clip: true; contentWidth: availableWidth
@@ -19,7 +20,7 @@ ScrollView {
                 Field {
                     required property var modelData
                     spec: modelData
-                    enabled: !bridge.summary.busy && (modelData.key !== "reply_level" || bridge.values.activity.text_strategy === "ai")
+                    enabled: !workbenchSummary.busy && (modelData.key !== "reply_level" || bridge.values.activity.text_strategy === "ai")
                 }
             }
             Text {
@@ -44,14 +45,14 @@ ScrollView {
                 TextArea {
                     id: topic; objectName: "activityPreviewTopic"
                     text: "你对本课程的学习体验有哪些建议？"
-                    enabled: !bridge.summary.busy; wrapMode: TextEdit.Wrap; selectByMouse: true
+                    enabled: !workbenchSummary.busy; wrapMode: TextEdit.Wrap; selectByMouse: true
                     textFormat: TextEdit.PlainText; color: "#17243a"; Accessible.name: "示例问卷文本题干"
                 }
             }
             ActionButton {
                 objectName: "activityPreviewButton"
                 text: bridge.values.activity.choice_strategy === "random" && bridge.values.activity.text_strategy === "fixed_good" ? "生成本地示例" : "生成 AI 示例预览"
-                tone: "connect"; enabled: !bridge.summary.busy
+                tone: "connect"; enabled: !workbenchSummary.busy
                 onClicked: bridge.previewActivity(topic.text)
             }
             Text { text: bridge.activityPreview.reason; color: "#627086"; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true; textFormat: Text.PlainText }

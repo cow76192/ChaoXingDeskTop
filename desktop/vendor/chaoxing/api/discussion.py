@@ -146,10 +146,10 @@ class DiscussionAdapter:
             raise PlatformResponseError('当前讨论页面版本尚未适配，保留待处理。')
         query = parse_qs(urlsplit(detail_url).query)
         if query.get('courseId') != [str(course['courseId'])] or query.get('classId') != [str(course['clazzId'])]:
-            raise PlatformResponseError('讨论详情入口返回了其他课程或班级。')
+            raise PlatformResponseError('讨论详情入口返回了其他课程或班级。', 'identity_error')
         text, final_url = self.html(detail_url)
         if urlsplit(final_url).path != urlsplit(detail_url).path:
-            raise PlatformResponseError('讨论详情跳转到其他话题，已停止处理。')
+            raise PlatformResponseError('讨论详情跳转到其他话题，已停止处理。', 'identity_error')
         user, native, context, circle = [bootstrap_value(text, k) for k in ('user', 'topic', 'course', 'circle')]
         if not all(isinstance(x, dict) for x in (user, native, context, circle)):
             raise PlatformResponseError('讨论详情数据结构无效。')
@@ -158,10 +158,10 @@ class DiscussionAdapter:
         if (str(context.get('courseId')) != str(course['courseId'])
                 or str(context.get('classId')) != str(course['clazzId'])
                 or str(native.get('chapterId')) != str(info['knowledgeid'])):
-            raise PlatformResponseError('讨论课程、班级或章节上下文不一致。')
+            raise PlatformResponseError('讨论课程、班级或章节上下文不一致。', 'identity_error')
         if (str(native.get('uuid')) != match[2] or str(native.get('bbsid')) != match[1]
                 or str(circle.get('bbsid')) != match[1] or not native.get('id')):
-            raise PlatformResponseError('讨论原生话题或空间身份不一致。')
+            raise PlatformResponseError('讨论原生话题或空间身份不一致。', 'identity_error')
         try:
             quote_info = native.get('quoteInfo', '{}')
             quote_info = json.loads(quote_info) if isinstance(quote_info, str) else quote_info

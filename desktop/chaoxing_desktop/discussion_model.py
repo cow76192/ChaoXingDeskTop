@@ -1,5 +1,6 @@
 """Bounded independent discussion history and strict worker event contract."""
 import json
+from .record_stats import RecordStats
 from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt, QSortFilterProxyModel
 
 ROLE = int(Qt.ItemDataRole.UserRole) + 1
@@ -37,6 +38,7 @@ class DiscussionModel(QAbstractListModel):
         super().__init__(parent)
         self.rows, self.indices = [], {}
         self.characters = self.evicted = 0
+        self.stats = RecordStats()
 
     def roleNames(self):
         return {ROLE: b'modelData'}
@@ -54,6 +56,7 @@ class DiscussionModel(QAbstractListModel):
         self.beginResetModel()
         self.rows, self.indices = [], {}
         self.characters = self.evicted = 0
+        self.stats = RecordStats()
         self.endResetModel()
 
     def upsert(self, record):
@@ -63,6 +66,7 @@ class DiscussionModel(QAbstractListModel):
         size = len(json.dumps(row, ensure_ascii=False))
         i = self.indices.get(row['id'])
         if i is not None:
+            self.stats.add(self.rows[i], -1)
             self.characters -= len(json.dumps(self.rows[i], ensure_ascii=False))
             self.rows[i] = row
             self.dataChanged.emit(self.index(i), self.index(i), [ROLE])
@@ -73,9 +77,11 @@ class DiscussionModel(QAbstractListModel):
             self.indices[row['id']] = i
             self.endInsertRows()
         self.characters += size
+        self.stats.add(row)
         while len(self.rows) > self.MAX_ROWS or self.characters > self.MAX_CHARS:
             self.beginRemoveRows(QModelIndex(), 0, 0)
             old = self.rows.pop(0)
+            self.stats.add(old, -1)
             self.characters -= len(json.dumps(old, ensure_ascii=False))
             self.evicted += 1
             self.indices = {r['id']: n for n, r in enumerate(self.rows)}

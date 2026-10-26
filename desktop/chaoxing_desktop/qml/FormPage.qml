@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 ScrollView {
+    readonly property var workbenchSummary: bridge.summary
     id: page
     required property var groups
     property bool migration: false
@@ -34,9 +35,9 @@ ScrollView {
             title: "配置迁移与备份"
             description: "分享排障信息请使用排障配置；完整 INI 含明文凭据，且不是全部数据备份。"
             RowLayout {
-                ActionButton { text: "导入 INI"; tone: "save"; subtle: true; glyph: "import"; enabled: !bridge.summary.busy; onClicked: bridge.fileAction("import_config") }
-                ActionButton { objectName: page.migration ? "export_diagnostics" : ""; text: "导出排障配置"; tone: "save"; enabled: !bridge.summary.busy; onClicked: bridge.fileAction("export_diagnostics") }
-                ActionButton { text: "完整 INI（含凭据）"; tone: "warning"; subtle: true; glyph: "export"; enabled: !bridge.summary.busy; onClicked: bridge.fileAction("export_config") }
+                ActionButton { text: "导入 INI"; tone: "save"; subtle: true; glyph: "import"; enabled: !workbenchSummary.busy; onClicked: bridge.fileAction("import_config") }
+                ActionButton { objectName: page.migration ? "export_diagnostics" : ""; text: "导出排障配置"; tone: "save"; enabled: !workbenchSummary.busy; onClicked: bridge.fileAction("export_diagnostics") }
+                ActionButton { text: "完整 INI（含凭据）"; tone: "warning"; subtle: true; glyph: "export"; enabled: !workbenchSummary.busy; onClicked: bridge.fileAction("export_config") }
             }
             NoticeBanner { tone: "warning"; message: "完整 INI 含明文密码和密钥，请仅自行保管。分享排障信息请使用「导出排障配置」。"; Layout.fillWidth: true }
             ActionButton { objectName: page.migration ? "data_explanation" : ""; text: "本机数据与备份说明"; onClicked: dataInfo.open() }

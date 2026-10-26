@@ -1,8 +1,6 @@
 """Contracts for OCS-inspired desktop improvements; all requests are mocked."""
-import copy
 import io
 import json
-import os
 from pathlib import Path
 import queue
 import subprocess
@@ -17,11 +15,11 @@ from unittest.mock import Mock, patch
 import requests
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'vendor/chaoxing'))
 from api.answer import Tiku, TikuYanxi, TikuGo, TikuLike, TikuAdapter
-from chaoxing_desktop.answers import AnswerRouter, build_answers
+from chaoxing_desktop.answers import AnswerRouter
 from chaoxing_desktop.completion import completion_parts
-from chaoxing_desktop.config import defaults, to_payload, parse_text, serialize, Redactor, validate
+from chaoxing_desktop.config import defaults, to_payload, parse_text, serialize, Redactor
 from chaoxing_desktop.control import RunControl, Cancelled, ResumeFailed
-from chaoxing_desktop.declarative import DeclarativeBank, TEMPLATE, validate_definition
+from chaoxing_desktop.declarative import DeclarativeBank, TEMPLATE
 from chaoxing_desktop.diagnostics import offline_check
 from chaoxing_desktop.query_result import query_bank, safe_record
 from chaoxing_desktop.worker import Channel

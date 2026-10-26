@@ -56,10 +56,10 @@ with tempfile.TemporaryDirectory() as directory:
     window.setWidth(980); window.setHeight(700)
     QTest.qWait(100)
     assert token.property("text") == "abc123"
-    b.controller.active = True
+    b.controller.active = True; b.controller.busy_changed.emit(True)
     b.changed.emit()
     assert not token.isEnabled()
-    b.controller.active = False
+    b.controller.active = False; b.controller.busy_changed.emit(False)
     b.changed.emit()
     window.setProperty("pageIndex", 1)
     QTest.qWait(100)
@@ -77,7 +77,7 @@ with tempfile.TemporaryDirectory() as directory:
         QTest.mouseClick(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
         QTest.qWait(40)
 
-    b.controller.active = True
+    b.controller.active = True; b.controller.busy_changed.emit(True)
     b.changed.emit()
     with patch.object(b.controller, "reply") as reply:
         for kind, choices, expected in [("single", ["B"], "B"), ("multiple", ["A", "B"], "AB"), ("judgement", ["正确"], "正确")]:
@@ -107,7 +107,7 @@ with tempfile.TemporaryDirectory() as directory:
         QTest.qWait(100)
         click("manual_stop")
         reply.assert_called_with("", True)
-    b.controller.active = False
+    b.controller.active = False; b.controller.busy_changed.emit(False)
     b.changed.emit()
     window.close()
     delete(e)

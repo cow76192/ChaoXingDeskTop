@@ -4,10 +4,11 @@ import QtQuick.Controls.Basic as Basic
 import QtQuick.Layouts
 
 ColumnLayout {
+    readonly property var workbenchSummary: bridge.summary
     id: pane
     property string selectedId: ""
     property var selected: {
-        let state = bridge.summary
+        let state = workbenchSummary
         return selectedId ? bridge.activityDetail(selectedId) : ({})
     }
     function applyFilter() { bridge.filterActivities(search.text, statuses.currentValue || "") }
@@ -29,11 +30,11 @@ ColumnLayout {
     Text {
         Layout.fillWidth: true; wrapMode: Text.Wrap; color: "#627086"; font.pixelSize: 12
         text: {
-            let s = bridge.summary.activityStats, a = bridge.summary.activitySources
-            return "记录 " + bridge.summary.activityCount + " · 草稿 " + (s.draft || 0) + " · 已提交 " + (s.submitted || 0) + " · 已参与 " + (s.existing || 0) +
-                " · 提交未知 " + (s.submit_unknown || 0) + " · 待处理 " + (s.pending || 0) + " · 任务点确认 " + bridge.summary.activityConfirmed +
+            let s = workbenchSummary.activityStats, a = workbenchSummary.activitySources
+            return "记录 " + workbenchSummary.activityCount + " · 草稿 " + (s.draft || 0) + " · 已提交 " + (s.submitted || 0) + " · 已参与 " + (s.existing || 0) +
+                " · 提交未知 " + (s.submit_unknown || 0) + " · 待处理 " + (s.pending || 0) + " · 任务点确认 " + workbenchSummary.activityConfirmed +
                 "\n已解决答案来源：AI " + (a.ai || 0) + " · 随机 " + (a.random || 0) + " · 固定好 " + (a.fixed || 0) + "。答案生成、提交与任务完成分别记录。" +
-                (bridge.summary.activityEvicted ? " 已淘汰 " + bridge.summary.activityEvicted + " 条旧显示记录。" : "")
+                (workbenchSummary.activityEvicted ? " 已淘汰 " + workbenchSummary.activityEvicted + " 条旧显示记录。" : "")
         }
     }
     ListView {
@@ -76,7 +77,7 @@ ColumnLayout {
                 }
             }
             ActionButton { text: "复制逐题草稿"; enabled: !!pane.selected.detailText; onClicked: bridge.copyActivity(pane.selectedId) }
-            ActionButton { objectName: "editActivityCopy"; text: "编辑本地副本…"; tone: "connect"; enabled: (pane.selected.stage === "draft" || (pane.selected.stage === "pending" && pane.selected.submit_status === "draft")) && !bridge.summary.busy; onClicked: { detail.close(); bridge.openDraftCopy("activity", pane.selectedId) } }
+            ActionButton { objectName: "editActivityCopy"; text: "编辑本地副本…"; tone: "connect"; enabled: (pane.selected.stage === "draft" || (pane.selected.stage === "pending" && pane.selected.submit_status === "draft")) && !workbenchSummary.busy; onClicked: { detail.close(); bridge.openDraftCopy("activity", pane.selectedId) } }
         }
     }
 }
