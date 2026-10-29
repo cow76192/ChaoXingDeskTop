@@ -1,8 +1,8 @@
 # 桌面版使用与开发指南
 
-**版本：0.4.1** · Windows 10 / 11 x64 · Python + PySide6 / QML · GPL-3.0
+**版本：0.4.2** · Windows 10 / 11 x64 · Python + PySide6 / QML · GPL-3.0
 
-[项目首页](../README.md) · [下载安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/tag/v0.4.1) · [第三方声明](THIRD_PARTY_NOTICES.md)
+[项目首页](../README.md) · [下载安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/tag/v0.4.2) · [第三方声明](THIRD_PARTY_NOTICES.md)
 
 本文中的命令默认在 `desktop` 目录的 PowerShell 中执行。
 
@@ -22,7 +22,7 @@
 
 ### 1. 账号与课程
 
-在「课程与账号」登录或导入 Cookie，然后读取课程。可以添加多个账号，为其设置备注，并分别保留加密会话；重启后恢复最后选择的账号。
+在「课程与账号」点击「浏览器登录」完成扫码或网页登录，程序会自动获取 Cookie 并读取课程；也可手动登录或导入 Cookie。可以添加多个账号，为其设置备注，并分别保留加密会话；重启后恢复最后选择的账号。
 
 切换账号会清空当前课程、选择及任务结果，需要重新读取课程。任务运行期间锁定账号切换。导入已绑定账号的 Cookie 时，会校验平台用户身份。
 
@@ -161,27 +161,27 @@ python -m venv .venv-build
 ### 构建程序
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -OutputDirectory dist/release-0.4.1/ChaoxingDesktop
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -OutputDirectory dist/release-0.4.2/ChaoxingDesktop
 ```
 
 构建脚本会准备 `.venv-build`、安装锁定依赖并核对依赖闭包，随后运行单元与源码界面回归、执行 PyInstaller，最后验收冻结 worker 与 QML 界面。
 
-程序输出至 `dist/release-0.4.1/ChaoxingDesktop/`。可通过 `-Wheelhouse <绝对路径>` 使用完整的本地 wheel 目录离线安装。依赖更新需要重新生成、审阅锁文件，并在干净环境中验证。
+程序输出至 `dist/release-0.4.2/ChaoxingDesktop/`。可通过 `-Wheelhouse <绝对路径>` 使用完整的本地 wheel 目录离线安装。依赖更新需要重新生成、审阅锁文件，并在干净环境中验证。
 
 ### 生成安装包
 
 准备 [NSIS 编译器](https://nsis.sourceforge.io/Download)，将下方路径替换为本机的 `makensis.exe`：
 
 ```powershell
-.venv-build/Scripts/python.exe scripts/build_installer.py --app dist/release-0.4.1/ChaoxingDesktop --compiler "C:/Tools/NSIS/makensis.exe"
+.venv-build/Scripts/python.exe scripts/build_installer.py --app dist/release-0.4.2/ChaoxingDesktop --compiler "C:/Tools/NSIS/makensis.exe"
 ```
 
 产物默认写入项目根目录的 `release/`：
 
 ```text
-ChaoxingDesktop-0.4.0-Setup-win-x64.exe
-ChaoxingDesktop-0.4.0-source.zip
-ChaoxingDesktop-0.4.0-installer-SHA256.json
+ChaoxingDesktop-0.4.2-Setup-win-x64.exe
+ChaoxingDesktop-0.4.2-source.zip
+ChaoxingDesktop-0.4.2-installer-SHA256.json
 ```
 
 安装包包含完整程序、对应源码 ZIP、许可和第三方声明，NSIS 编译器不随包分发。生成安装包前会核对程序版本、源码与产物哈希，以及单元、worker、GUI 验收标记；跳过 GUI 的构建不能用于正式发布。修改构建输入后，需要重新构建和验收。

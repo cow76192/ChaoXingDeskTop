@@ -2,17 +2,17 @@
 
 面向 Windows 的超星课程学习工作台，用一个桌面窗口管理账号、课程、章节任务、题库与 AI 服务，以及逐题结果和日志。
 
-**当前版本：0.4.1** · **Windows 10 / 11 x64** · **Python + PySide6 / QML** · **GPL-3.0**
+**当前版本：0.4.2** · **Windows 10 / 11 x64** · **Python + PySide6 / QML** · **GPL-3.0**
 
-[下载安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.4.1/ChaoxingDesktop-0.4.1-Setup-win-x64.exe) · [发行说明](https://github.com/mikubob/ChaoXingDeskTop/releases/tag/v0.4.1) · [使用与构建指南](desktop/README.md) · [第三方声明](desktop/THIRD_PARTY_NOTICES.md)
+[下载安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.4.2/ChaoxingDesktop-0.4.2-Setup-win-x64.exe) · [发行说明](https://github.com/mikubob/ChaoXingDeskTop/releases/tag/v0.4.2) · [使用与构建指南](desktop/README.md) · [第三方声明](desktop/THIRD_PARTY_NOTICES.md)
 
 ## 下载与安装
 
 | 文件 | 用途 |
 | --- | --- |
-| [Windows x64 安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.4.1/ChaoxingDesktop-0.4.1-Setup-win-x64.exe) | 日常使用，已包含 Python 运行环境 |
-| [对应版本源码](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.4.1/ChaoxingDesktop-0.4.1-source.zip) | 查看实现、自行运行或构建 |
-| [SHA256 校验清单](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.4.1/ChaoxingDesktop-0.4.1-installer-SHA256.json) | 核对安装包及源码 ZIP 的完整性 |
+| [Windows x64 安装包](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.4.2/ChaoxingDesktop-0.4.2-Setup-win-x64.exe) | 日常使用，已包含 Python 运行环境 |
+| [对应版本源码](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.4.2/ChaoxingDesktop-0.4.2-source.zip) | 查看实现、自行运行或构建 |
+| [SHA256 校验清单](https://github.com/mikubob/ChaoXingDeskTop/releases/download/v0.4.2/ChaoxingDesktop-0.4.2-installer-SHA256.json) | 核对安装包及源码 ZIP 的完整性 |
 
 下载并运行安装包，按提示完成安装后，从桌面或开始菜单打开「超星桌面版」。首次使用可以直接选择「离线演示」，体验界面和任务流程。
 
@@ -47,6 +47,12 @@
 **0.3.8 新增讨论任务功能**：在「题库与 AI → 讨论任务」启用处理，选择精简、中等、详细或固定单字“好”；按需独立开启讨论自动提交。关闭提交时仅保存草稿，在「任务与日志 → 讨论记录」查看和复制。前三档复用 AI 服务；固定好不调用模型。新配置默认关闭讨论处理和提交。
 
 支持经章节 `insertbbs` 明确关联的新版超星讨论；非任务点、未知页面和无法核实本人回复时不自动发布。发布结果未知时保留记录，只读核验，不盲目重发。发布、任务点完成和成绩是三个不同结果。[讨论协议与边界](desktop/vendor/chaoxing/api/DISCUSSION_PROTOCOL.md)
+
+## 0.4.2 更新
+
+- 新增浏览器登录：使用独立的 Edge / Chrome 窗口完成扫码或网页登录，自动获取 Cookie、加密保存并读取课程。
+- 支持取消登录与超时退出，关闭独立登录窗口并清理临时配置；已有账号校验用户身份，登录其他账号请先点击「添加账号」。
+- 需要本机安装 Edge 或 Chrome；浏览器策略不允许本地调试时，可继续手动导入 Cookie。未新增依赖。
 
 ## 0.4.1 更新
 
