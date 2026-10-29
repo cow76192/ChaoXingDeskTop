@@ -11,6 +11,7 @@ ColumnLayout {
     spacing: page.height < 540 ? 10 : 16
     ScrollView {
         id: accountScroll
+        objectName: "accountScroll"
         Layout.fillWidth: true
         implicitHeight: 260
         Layout.minimumHeight: 150
@@ -37,7 +38,7 @@ ColumnLayout {
                         if (model[i].id === workbenchSummary.activeAccount) return i
                     return -1
                 }
-                displayText: currentIndex < 0 ? "新账号 · 填写下方信息或导入 Cookie" : currentText
+                displayText: currentIndex < 0 ? "新账号 · 浏览器登录或导入 Cookie" : currentText
                 enabled: !workbenchSummary.busy && !workbenchSummary.accountError
                 Accessible.name: "切换学习账号"
                 onActivated: function(index) { bridge.switchAccount(model[index].id) }
@@ -45,8 +46,14 @@ ColumnLayout {
             ActionButton { objectName: "account_add"; text: "添加账号"; enabled: !workbenchSummary.busy && !workbenchSummary.accountError; onClicked: { bridge.addAccount(); page.accountOpen = true } }
             ActionButton { objectName: "account_delete"; text: "删除账号"; tone: "danger"; subtle: true; enabled: !workbenchSummary.busy && workbenchSummary.activeAccount !== ""; onClicked: deleteAccountDialog.open() }
         }
-        Text { visible: workbenchSummary.busy; text: "任务执行中，停止后可切换账号。"; color: "#627086"; font.pixelSize: 12 }
+        Text { visible: workbenchSummary.busy; text: workbenchSummary.browserLogin ? "请在浏览器完成登录，程序将自动连接账号。" : "任务执行中，停止后可切换账号。"; color: "#627086"; font.pixelSize: 12 }
         Text { visible: !!workbenchSummary.accountError; text: workbenchSummary.accountError; color: "#be123c"; Layout.fillWidth: true; wrapMode: Text.Wrap }
+        RowLayout {
+            Layout.fillWidth: true
+            ActionButton { objectName: "account_browser_login"; text: "浏览器登录"; tone: "connect"; glyph: "user"; enabled: !workbenchSummary.busy && !workbenchSummary.accountError; onClicked: bridge.browserLogin() }
+            ActionButton { objectName: "account_browser_cancel"; visible: !!workbenchSummary.browserLogin; text: "取消浏览器登录"; onClicked: bridge.cancelBrowserLogin() }
+            Text { Layout.fillWidth: true; text: "支持扫码 / 网页登录，成功后自动获取 Cookie 并读取课程"; color: "#627086"; font.pixelSize: 12; wrapMode: Text.Wrap }
+        }
         RowLayout {
             Layout.fillWidth: true
             visible: page.accountOpen && workbenchSummary.activeAccount !== ""

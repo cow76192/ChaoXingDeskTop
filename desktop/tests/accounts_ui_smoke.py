@@ -48,11 +48,31 @@ with tempfile.TemporaryDirectory() as directory:
     def click(name):
         item = find(name)
         assert item and item.isEnabled() and item.isVisible(), name
+        if name.startswith('account_'):
+            scroll = find('accountScroll')
+            flick = scroll.property('contentItem')
+            top = scroll.mapToScene(QPointF(0, 0)).y()
+            item_top = item.mapToScene(QPointF(0, 0)).y()
+            item_bottom = item_top + item.height()
+            if item_bottom > top + scroll.height():
+                flick.setProperty('contentY', flick.property('contentY') + item_bottom - top - scroll.height() + 8)
+            elif item_top < top:
+                flick.setProperty('contentY', max(0, flick.property('contentY') + item_top - top - 8))
+            QTest.qWait(40)
         point = item.mapToScene(QPointF(item.width() / 2, item.height() / 2)).toPoint()
         QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, point)
         QTest.qWait(80)
 
     QTest.qWait(150)
+    # The new browser entry is reachable and cancellation unlocks account UI.
+    with patch('chaoxing_desktop.qml_backend.BrowserLogin.start'):
+        click('account_browser_login')
+    b._browser_login.active = True
+    assert b.summary['browserLogin'] and b.busy
+    assert not find('account_selector').isEnabled()
+    assert not find('account_browser_login').isEnabled()
+    click('account_browser_cancel')
+    assert not b.busy and not b.summary['browserLogin']
     assert find('account_selector').property('currentIndex') == 1
     assert find('account_username').property('readOnly')
     selector = find('account_selector')
@@ -67,6 +87,8 @@ with tempfile.TemporaryDirectory() as directory:
     window.setWidth(980)
     window.setHeight(700)
     QTest.qWait(120)
+    find('accountScroll').property('contentItem').setProperty('contentY', 0)
+    QTest.qWait(40)
     assert window.grabWindow().save(str(destination / '账号展开-980.png'))
     b.on_event(dict(type='courses', demo=False, courses=[dict(courseId='101', clazzId='01', title='账号 A 的示例课程')]))
     b.selectVisible(True)
