@@ -1,6 +1,8 @@
 # 来源与许可
 
-桌面版：ChaoxingDesktop 0.4.1，GPL-3.0。完整许可见 LICENSE。
+桌面版：ChaoxingDesktop 0.4.2，GPL-3.0。完整许可见 LICENSE。
+
+0.4.2 合入 PR #1 的独立浏览器登录，使用既有 PySide6 的 QtWebSockets 与本机 Edge / Chrome 的本地调试接口获取 Cookie；不分发浏览器，不新增第三方依赖。其余来源与许可沿用 0.4.1。
 
 0.4.1 独立实现填空布局与逐空校验、来源分隔符声明、保存诊断和只读核验增量刷新／进度／失败恢复；平台适配改动位于 api/base.py、api/decode.py、api/activity.py、api/discussion.py、api/responses.py。移除无调用的列表快照、重复章节索引与无用导入；未新增第三方代码或依赖。
 

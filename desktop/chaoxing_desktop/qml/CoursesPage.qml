@@ -11,6 +11,7 @@ ColumnLayout {
     spacing: page.height < 540 ? 10 : 16
     ScrollView {
         id: accountScroll
+        objectName: "accountScroll"
         Layout.fillWidth: true
         implicitHeight: 260
         Layout.minimumHeight: 150
@@ -37,7 +38,7 @@ ColumnLayout {
                         if (model[i].id === workbenchSummary.activeAccount) return i
                     return -1
                 }
-                displayText: currentIndex < 0 ? "新账号 · 填写下方信息或导入 Cookie" : currentText
+                displayText: currentIndex < 0 ? "新账号 · 浏览器登录或导入 Cookie" : currentText
                 enabled: !workbenchSummary.busy && !workbenchSummary.accountError
                 Accessible.name: "切换学习账号"
                 onActivated: function(index) { bridge.switchAccount(model[index].id) }
@@ -45,8 +46,14 @@ ColumnLayout {
             ActionButton { objectName: "account_add"; text: "添加账号"; enabled: !workbenchSummary.busy && !workbenchSummary.accountError; onClicked: { bridge.addAccount(); page.accountOpen = true } }
             ActionButton { objectName: "account_delete"; text: "删除账号"; tone: "danger"; subtle: true; enabled: !workbenchSummary.busy && workbenchSummary.activeAccount !== ""; onClicked: deleteAccountDialog.open() }
         }
-        Text { visible: workbenchSummary.busy; text: "任务执行中，停止后可切换账号。"; color: "#627086"; font.pixelSize: 12 }
+        Text { visible: workbenchSummary.busy; text: workbenchSummary.browserLogin ? "请在浏览器完成登录，程序将自动连接账号。" : "任务执行中，停止后可切换账号。"; color: "#627086"; font.pixelSize: 12 }
         Text { visible: !!workbenchSummary.accountError; text: workbenchSummary.accountError; color: "#be123c"; Layout.fillWidth: true; wrapMode: Text.Wrap }
+        RowLayout {
+            Layout.fillWidth: true
+            ActionButton { objectName: "account_browser_login"; text: "浏览器登录"; tone: "connect"; glyph: "user"; enabled: !workbenchSummary.busy && !workbenchSummary.accountError; onClicked: bridge.browserLogin() }
+            ActionButton { objectName: "account_browser_cancel"; visible: !!workbenchSummary.browserLogin; text: "取消浏览器登录"; onClicked: bridge.cancelBrowserLogin() }
+            Text { Layout.fillWidth: true; text: "支持扫码 / 网页登录，成功后自动获取 Cookie 并读取课程"; color: "#627086"; font.pixelSize: 12; wrapMode: Text.Wrap }
+        }
         RowLayout {
             Layout.fillWidth: true
             visible: page.accountOpen && workbenchSummary.activeAccount !== ""
@@ -135,7 +142,42 @@ ColumnLayout {
                     Text { text: modelData.title; font.pixelSize: 15; font.bold: true; color: "#17243a"; elide: Text.ElideRight; Layout.fillWidth: true; ToolTip.visible: titleHover.hovered; ToolTip.text: modelData.title; HoverHandler { id: titleHover } }
                     Text { text: (modelData.teacher ? modelData.teacher + " · " : "") + (modelData.desc || ("班级 " + modelData.clazzId)) + (page.showIds ? "  · 课程 " + modelData.courseId + " / 班级 " + modelData.clazzId : ""); font.pixelSize: 12; color: "#627086"; elide: Text.ElideRight; Layout.fillWidth: true }
                 }
-                Text { text: workbenchSummary.demo ? "示例课程" : "可选择"; color: workbenchSummary.demo ? "#7c3aed" : "#627086"; font.pixelSize: 12 }
+                ColumnLayout {
+                    objectName: "course_progress_" + modelData.courseId + "_" + modelData.clazzId
+                    Layout.preferredWidth: 175
+                    Layout.minimumWidth: 175
+                    Layout.maximumWidth: 175
+                    spacing: 5
+                    property var progress: modelData.progress || ({})
+                    property bool hasProgress: progress.total !== undefined
+                    Text {
+                        Layout.alignment: Qt.AlignRight
+                        text: workbenchSummary.demo ? "示例课程" : parent.hasProgress
+                              ? (parent.progress.total === 0 ? "暂无章节" : "已完成 " + parent.progress.completed + " / " + parent.progress.total + " 章")
+                              : parent.progress.loading ? "统计中…" : parent.progress.failed ? "统计失败" : "待统计"
+                        color: parent.hasProgress && parent.progress.total > 0 && parent.progress.completed === parent.progress.total ? "#16804a" : "#627086"
+                        font.pixelSize: 12
+                        Accessible.name: modelData.title + " · " + text
+                    }
+                    ProgressBar {
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        visible: !workbenchSummary.demo && parent.hasProgress && parent.progress.total > 0
+                        from: 0; to: Math.max(1, parent.progress.total || 0); value: parent.progress.completed || 0
+                        Layout.preferredHeight: 5
+                    }
+                    Text {
+                        Layout.alignment: Qt.AlignRight
+                        visible: !workbenchSummary.demo && parent.hasProgress
+                        text: parent.progress.loading ? (parent.progress.cached ? "缓存 · 统计中…" : "统计中…")
+                              : parent.progress.failed ? "更新失败 · 保留上次统计"
+                              : parent.progress.cached ? "本地缓存" : "已更新"
+                        color: "#8290a3"; font.pixelSize: 10
+                        ToolTip.visible: progressHover.hovered
+                        ToolTip.text: parent.progress.checked_at ? "章节进度更新时间：" + parent.progress.checked_at : ""
+                        HoverHandler { id: progressHover }
+                    }
+                }
             }
         }
         Column {

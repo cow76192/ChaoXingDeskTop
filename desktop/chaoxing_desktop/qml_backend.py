@@ -21,13 +21,15 @@ from .activity_model import ActivityModel, ActivityFilter, safe_record as safe_a
 from .attention_model import AttentionModel, AttentionFilter, chapter_issue, record_issue
 from .query_result import safe_record
 from .providers import PROVIDER_SPECS
-from .accounts import AccountStore, parse_cookie, write_cookie
+from .accounts import AccountStore, cookie_uid, parse_cookie, write_cookie
+from .browser_login import BrowserLogin
 from .storage import revision, write_if_unchanged, atomic_write
 from .diagnostic_export import diagnostic_config
 from .run_history import RunHistory
 from .draft_copies import DraftCopies, make_copy, fingerprint, editable_source, constraints, export_text
 from .release_info import RELEASE_URLS, verification_info
 from .ai_profiles import AIProfiles
+from .course_progress import CourseProgressCache, progress_key, valid_progress
 
 
 class Backend(QObject):
@@ -49,6 +51,8 @@ class Backend(QObject):
         super().__init__(parent)
         self.config = defaults()
         self._closed = False
+        self._browser_login = None
+        self._browser_sessions = []
         self.startup_error = None
         self.message = "准备就绪。连接账户，或通过离线演示体验学习工作台。"
         self.tone = "info"
@@ -158,6 +162,12 @@ class Backend(QObject):
         self.controller.finished.connect(self.on_finished)
         self.controller.busy_changed.connect(lambda _: self.busyChanged.emit())
         self.controller.busy_changed.connect(lambda busy: self.changed.emit() if busy else None)
+        self._course_progress = {}
+        self._course_progress_identity = None
+        self._course_refresh_pending = False
+        self._course_controller = Controller(self)
+        self._course_controller.event.connect(self.on_course_progress_event)
+        self._course_controller.finished.connect(self.on_course_progress_finished)
         self.configChanged.connect(self.refresh_redactor)
         self._account_rows_cache, self._cookie_exists = [], False
         self.verification_progress = {}
@@ -255,8 +265,101 @@ class Backend(QObject):
 
     @Property("QVariantList", notify=coursesChanged)
     def courseRows(self):
-        return [dict(c, selected=course_key(c) in self.selected) for c in self.courses
+        return [dict(c, selected=course_key(c) in self.selected,
+                     progress=self._course_progress.get(progress_key(c), dict(loading=False))) for c in self.courses
                 if self.course_visible(c)]
+
+    def course_progress_cache(self):
+        if self.demo_mode or not self.account_store or not self.account_store.active:
+            return None
+        account = self.account_store.get(self.account_store.active)
+        if account and account['uid']:
+            return CourseProgressCache(data_dir(), account['id'], account['uid'])
+        return None
+
+    def load_course_progress(self):
+        cache = self.course_progress_cache()
+        rows = cache.read() if cache else {}
+        self._course_progress = {
+            progress_key(c): dict(rows.get(progress_key(c), {}), loading=not self.demo_mode,
+                                  cached=progress_key(c) in rows, failed=False)
+            for c in self.courses}
+
+    def cancel_course_progress(self):
+        self._course_refresh_pending = False
+        self._course_progress_identity = None
+        self._course_controller.stop()
+        for row in self._course_progress.values():
+            row['loading'] = False
+        self.coursesChanged.emit()
+
+    def start_course_progress(self):
+        if self._closed or self.demo_mode or self.busy or not self.courses:
+            return
+        try:
+            if self.identity() != self.course_identity or self.course_progress_cache() is None:
+                return
+            if self._course_controller.active:
+                self._course_refresh_pending = True
+                return
+            config = defaults()
+            config['common'].update(username=self.config['common']['username'], password='', use_cookies='true')
+            self._course_progress_identity = self.identity()
+            account = self.account_store.get(self.account_store.active)
+            for row in self._course_progress.values():
+                row.update(loading=True, failed=False)
+            self.coursesChanged.emit()
+            self._course_controller.start(dict(
+                action='course_progress', demo=False, config=to_payload(config),
+                selected=[list(course_key(c)) for c in self.courses], data_dir=str(data_dir()),
+                account_id=account['id'], account_uid=account['uid'],
+                cookie_mtime_ns=self._course_progress_identity[-1]))
+        except (OSError, ValueError):
+            self.on_course_progress_finished(-1)
+
+    def apply_course_progress(self, event):
+        key = progress_key(event)
+        if key not in {progress_key(c) for c in self.courses}:
+            return
+        row = self._course_progress.setdefault(key, {})
+        kind = event['type']
+        if kind == 'course_progress_loading':
+            row.update(loading=True, failed=False)
+        elif kind == 'course_progress_failed':
+            row.update(loading=False, failed=True)
+        elif kind == 'course_progress' and valid_progress(event):
+            row.update({k: event[k] for k in ('completed', 'total', 'checked_at')})
+            row.update(loading=False, cached=False, failed=False)
+            cache = self.course_progress_cache()
+            if cache:
+                try:
+                    cache.save(event)
+                except (OSError, ValueError):
+                    pass  # A cache write failure must not interrupt learning.
+        self.coursesChanged.emit()
+
+    def on_course_progress_event(self, event):
+        try:
+            if self._course_progress_identity is None or self.identity() != self._course_progress_identity:
+                return
+        except OSError:
+            return
+        if event['type'] in ('course_progress', 'course_progress_loading', 'course_progress_failed'):
+            self.apply_course_progress(event)
+        elif event['type'] == 'input':
+            # Background statistics never interrupt the user with a login prompt.
+            self._course_controller.stop()
+
+    def on_course_progress_finished(self, code):
+        if self._course_progress_identity is not None:
+            for row in self._course_progress.values():
+                if row.get('loading'):
+                    row.update(loading=False, failed=True)
+            self.coursesChanged.emit()
+        self._course_progress_identity = None
+        pending, self._course_refresh_pending = self._course_refresh_pending, False
+        if pending:
+            QTimer.singleShot(0, self.start_course_progress)
 
     def course_visible(self, course):
         return not self.search or self.search.casefold() in (course["title"] + str(course["courseId"])).casefold()
@@ -266,7 +369,8 @@ class Backend(QObject):
         hidden = sum(course_key(c) in self.selected and not self.course_visible(c) for c in self.courses) if self.search else 0
         counts = self._task_model.counts
         total = len(self.tasks)
-        return dict(message=self.message, tone=self.tone, busy=self.controller.active,
+        return dict(message=self.message, tone=self.tone, busy=self.busy,
+                    browserLogin=self._browser_login is not None,
                     stopping=self.controller.stopping and self.controller.active,
                     paused=self.controller.paused, bankStatus=self.bank_status,
                     questionCount=len(self._question_model.rows), questionEvicted=self._question_model.evicted,
@@ -298,7 +402,7 @@ class Backend(QObject):
 
     @Property(bool, notify=busyChanged)
     def busy(self):
-        return self.controller.active
+        return self.controller.active or self._browser_login is not None
 
     @Property('QVariantMap', notify=changed)
     def aiUsage(self):
@@ -315,7 +419,7 @@ class Backend(QObject):
     @Slot(str, str, result=bool)
     def aiProfileAction(self, action, value):
         def run():
-            if self.controller.active:
+            if self.busy:
                 raise ValueError('运行中锁定 AI 档案。')
             store = AIProfiles(data_dir())
             if action == 'save':
@@ -494,7 +598,7 @@ class Backend(QObject):
     @Slot(str, int, result=bool)
     def deleteSavedDraft(self, copy_id, version):
         def run():
-            if self.controller.active or not self.draft_account():
+            if self.busy or not self.draft_account():
                 raise ValueError('请先结束当前操作并选择原账号。')
             DraftCopies(data_dir(), self.draft_account()).delete(copy_id, version)
             if self._draft and self._draft['id'] == copy_id:
@@ -575,7 +679,7 @@ class Backend(QObject):
     @Slot(str, result=bool)
     def prepareRecovery(self, run_id):
         def run():
-            if self.controller.active:
+            if self.busy:
                 raise ValueError('请先结束当前操作。')
             self.loadRunHistory()
             summary = next((r for r in self.history_rows if r['id'] == run_id), None)
@@ -673,6 +777,7 @@ class Backend(QObject):
                 'accounts.json 与 accounts/：账号索引与受保护的会话。DPAPI 绑定 Windows 用户和设备，复制文件不保证跨机解密。\n'
                 'discussions/ 与 activities/：草稿、正文／答案及发布／提交意图。内容未使用凭据加密封装；未决意图用于防重复，不能当缓存删除。\n'
                 'run_summaries/：按账号隔离的最近 20 轮摘要，每账号最多 2 MiB，每轮最多 1000 个未完成章节标题。包含课程名，不含题干或答案；每 2 秒最多保存一次。摘要不能作为提交证据，也不会自动重放请求。\n'
+                'course_progress/：按账号与平台用户隔离的章节进度缓存，每份最多 2000 门课程 / 1 MiB，只含课程标识、章节计数和更新时间。可安全删除，后台只读更新；不作为执行或提交凭据。\n'
                 'draft_copies/：按账号隔离的人工编辑副本，最多 20 项 / 2 MiB，含正文和原题，未加密。与生产草稿／意图独立，不能作为提交证据。\n'
                 'ai_profiles.json：最多 20 个命名 AI 配置；配置与独立凭据用 DPAPI 加密，不会自动切换服务。完整 INI 不包含这些档案。\n'
                 'logs/（或自选目录）：已脱敏日志，单文件约 10 MiB、总量 100 MiB、保留 14 天。课程与题目内容未自动匿名。日志导出仅含当前保留快照。\n\n'
@@ -731,6 +836,8 @@ class Backend(QObject):
         return self.account_store.cookie_path(self.account_store.active)
 
     def reset_account_view(self):
+        self.cancel_course_progress()
+        self._course_progress.clear()
         self._record_cards.clear()
         self.verification_progress = {}
         self._recovery = None
@@ -773,8 +880,73 @@ class Backend(QObject):
         return store.get(store.active)
 
     @Slot()
+    def browserLogin(self):
+        if self.busy:
+            return
+        self.cancel_course_progress()
+        def run():
+            self.require_account_store()
+            account_id = self.account_store.active
+            login = BrowserLogin(self)
+            self._browser_sessions.append(login)
+            self._browser_login = login
+            login.released.connect(lambda: self._release_browser(login))
+            login.finished.connect(lambda reason: self._browser_finished(login, reason))
+            login.succeeded.connect(lambda cookies: self._browser_cookies(account_id, cookies))
+            try:
+                login.start()
+            except Exception:
+                self._browser_finished(login, '')
+                login.shutdown()
+                self._release_browser(login)
+                raise
+            self.busyChanged.emit()
+            self.changed.emit()
+            self.notify('请在弹出的浏览器中完成登录（可扫码）。进入个人空间后将自动获取 Cookie 并读取课程；可点击「取消浏览器登录」。')
+        self.execute(run)
+
+    def _release_browser(self, login):
+        if login in self._browser_sessions:
+            self._browser_sessions.remove(login)
+            login.deleteLater()
+
+    def _browser_finished(self, login, reason):
+        if self._browser_login is not login:
+            return
+        self._browser_login = None
+        self.busyChanged.emit()
+        self.changed.emit()
+        if reason:
+            self.notify(reason, 'warning')
+
+    def _browser_cookies(self, account_id, cookies):
+        def run():
+            if self._closed or self.busy or self.account_store.active != account_id:
+                raise ValueError('当前账号已变化，请重新进行浏览器登录。')
+            # Check identity before writing so another user's login cannot replace
+            # a saved session. The worker still verifies the session remotely.
+            row = self.account_store.get(account_id)
+            uid = cookie_uid(cookies)
+            if row and row['uid'] and row['uid'] != uid:
+                raise ValueError('浏览器登录的用户与当前账号不一致。请点击「添加账号」后重新登录。')
+            row = row or self.ensure_account()
+            write_cookie(self.cookie_path(), cookies, row['uid'])
+            self.config['common'].update(password='', use_cookies='true')
+            self.reset_account_view()
+            self.refresh_account_status()
+            self.configChanged.emit()
+            self.notify('已获取并加密保存 Cookie，正在验证登录并读取课程…')
+            self.fetchCourses()
+        self.execute(run)
+
+    @Slot()
+    def cancelBrowserLogin(self):
+        if self._browser_login:
+            self._browser_login.cancel()
+
+    @Slot()
     def addAccount(self):
-        if self.controller.active:
+        if self.busy:
             return
         def run():
             store = self.require_account_store()
@@ -786,7 +958,7 @@ class Backend(QObject):
 
     @Slot(str)
     def switchAccount(self, account_id):
-        if self.controller.active:
+        if self.busy:
             self.notify('请先停止当前任务，再切换账号。', 'warning')
             return
         def run():
@@ -805,7 +977,7 @@ class Backend(QObject):
 
     @Slot(str)
     def renameAccount(self, label):
-        if self.controller.active:
+        if self.busy:
             return
         def run():
             store = self.require_account_store()
@@ -818,7 +990,7 @@ class Backend(QObject):
 
     @Slot()
     def removeAccount(self):
-        if self.controller.active:
+        if self.busy:
             return
         def run():
             store = self.require_account_store()
@@ -830,7 +1002,7 @@ class Backend(QObject):
 
     @Slot(str, str, str)
     def setValue(self, section, key, value):
-        if self.controller.active or not self.config.has_option(section, key):
+        if self.busy or not self.config.has_option(section, key):
             return
         if self.config[section][key] == value:
             return
@@ -850,7 +1022,7 @@ class Backend(QObject):
 
     @Slot(str, bool)
     def toggleProvider(self, key, checked):
-        if self.controller.active or key not in self.provider_order:
+        if self.busy or key not in self.provider_order:
             return
         enabled = set(self.enabled_providers())
         enabled.add(key) if checked else enabled.discard(key)
@@ -860,7 +1032,7 @@ class Backend(QObject):
     @Slot(int, int)
     def moveProvider(self, index, delta):
         target = index + delta
-        if self.controller.active or not (0 <= index < len(self.provider_order) and 0 <= target < len(self.provider_order)):
+        if self.busy or not (0 <= index < len(self.provider_order) and 0 <= target < len(self.provider_order)):
             return
         self.provider_order[index], self.provider_order[target] = self.provider_order[target], self.provider_order[index]
         enabled = self.enabled_providers()
@@ -877,7 +1049,7 @@ class Backend(QObject):
     @Slot(str, str, bool)
     def selectCourse(self, course, clazz, checked):
         key = (course, clazz)
-        if self.controller.active or key not in {course_key(c) for c in self.courses}:
+        if self.busy or key not in {course_key(c) for c in self.courses}:
             return
         self.selected.add(key) if checked else self.selected.discard(key)
         self.coursesChanged.emit()
@@ -885,7 +1057,7 @@ class Backend(QObject):
 
     @Slot(bool)
     def selectVisible(self, checked):
-        if self.controller.active:
+        if self.busy:
             return
         keys = {course_key(c) for c in self.courses if self.course_visible(c)}
         self.selected.update(keys) if checked else self.selected.difference_update(keys)
@@ -899,7 +1071,7 @@ class Backend(QObject):
                 c["use_cookies"], cookie.stat().st_mtime_ns if cookie and cookie.exists() else None)
 
     def begin(self, action, demo=False, selected=None, topic=''):
-        if self.controller.active:
+        if self.busy:
             raise ValueError("请先停止当前任务。")
         config = defaults() if demo else self.config
         if action == "courses" and not demo:
@@ -948,6 +1120,7 @@ class Backend(QObject):
                 raise ValueError('请先启用并配置 AI，或选择随机选择与固定好。')
             validate(isolated, services=True)
             config = isolated
+        self.cancel_course_progress()
         self.operation, self.outcome = action, False
         self.ai_usage = dict(requests=0, limit=int(config['ai']['request_limit']), known=0, unknown=0, tokens=0)
         self._ai_token_warning = int(config['ai']['token_warning'])
@@ -1041,7 +1214,7 @@ class Backend(QObject):
 
     def _verify(self, records, all_records=False):
         def run():
-            if self.controller.active:
+            if self.busy:
                 raise ValueError('请先结束当前操作。')
             if self.demo_mode:
                 self.notify('离线演示不读取平台；只读核验须先读取真实课程。')
@@ -1061,6 +1234,7 @@ class Backend(QObject):
             config = defaults()
             config['common'].update(username=self.config['common']['username'], password='', use_cookies='true')
             validate(config, login=True, cookie_path=self.cookie_path())
+            self.cancel_course_progress()
             self.operation, self.outcome = 'verify', False
             self.verification_progress = {}
             self.operation_account = self.account_store.active
@@ -1113,7 +1287,7 @@ class Backend(QObject):
     @Slot(str)
     def previewActivity(self, topic):
         def run():
-            if self.controller.active:
+            if self.busy:
                 raise ValueError('请先结束当前任务，再预览。')
             if not topic.strip() or len(topic) > 2000:
                 raise ValueError('请填写不超过 2000 字符的示例文本题干。')
@@ -1141,7 +1315,7 @@ class Backend(QObject):
     @Slot(str)
     def previewDiscussion(self, topic):
         def run():
-            if self.controller.active:
+            if self.busy:
                 raise ValueError('请先结束当前任务，再生成预览。')
             if not topic.strip() or len(topic) > 12000:
                 raise ValueError('请填写不超过 12000 字符的示例讨论主题。')
@@ -1168,7 +1342,7 @@ class Backend(QObject):
 
     @Slot()
     def offlineCheck(self):
-        if self.controller.active:
+        if self.busy:
             return
         def run():
             from .diagnostics import offline_check
@@ -1183,7 +1357,7 @@ class Backend(QObject):
 
     @Slot(str)
     def definitionAction(self, action):
-        if self.controller.active:
+        if self.busy:
             return
         def run():
             from .declarative import TEMPLATE, validate_definition, preview_definition
@@ -1213,7 +1387,7 @@ class Backend(QObject):
         pending, self._definition_import = self._definition_import, None
         if not accepted or not pending:
             return
-        if self.controller.active or self.config['question_bank']['declarative_definition'] != pending[1]:
+        if self.busy or self.config['question_bank']['declarative_definition'] != pending[1]:
             self.notify('当前定义或运行状态已变化，请重新导入预览。', 'warning')
             return
         self.setValue('question_bank', 'declarative_definition', pending[0])
@@ -1240,6 +1414,7 @@ class Backend(QObject):
 
     @Slot()
     def stop(self):
+        self.cancelBrowserLogin()
         if not self.controller.active:
             return
         self.clear_input()
@@ -1441,6 +1616,7 @@ class Backend(QObject):
             self.courses = event["courses"]
             self.demo_mode = event.get("demo", False)
             self.course_identity = self.identity()
+            self.load_course_progress()
             self.coursesChanged.emit()
             self.mode = "离线演示 · 示例数据" if self.demo_mode else "课程已读取"
             self.notify(f"已读取 {len(self.courses)} 门{'演示' if self.demo_mode else '真实'}课程。", "success")
@@ -1456,6 +1632,11 @@ class Backend(QObject):
                     self.notify(f'已重新读课并选择 {len(self.selected)} 门可定位课程，另有 {missing} 门未找到。请检查策略后手动开始；新轮会重读平台状态。', 'warning')
                 else:
                     self.notify('账号身份已变化，未恢复课程选择。请重新读取原账号课程。', 'warning')
+        elif kind in ('course_progress', 'course_progress_loading', 'course_progress_failed'):
+            if (not self.demo_mode and self.account_store and
+                    self.operation_account == self.account_store.active):
+                self.apply_course_progress(event)
+            return
         elif kind == "tasks":
             self._attention_model.clear()
             self._task_model.reset([dict(t, status="waiting") for t in event["tasks"]])
@@ -1547,11 +1728,13 @@ class Backend(QObject):
             if not saved:
                 self.history_error = error
             self._history_run = ''
+        if code == 0 and self.outcome and self.operation in ('courses', 'run', 'verify') and not self.controller.stopping:
+            QTimer.singleShot(0, self.start_course_progress)
         self.changed.emit()
 
     @Slot(result=bool)
     def save(self):
-        if self.controller.active:
+        if self.busy:
             return False
         try:
             self._closed = False
@@ -1617,7 +1800,14 @@ class Backend(QObject):
                 self.notify(exc, "danger")
                 return False
         self.stop()
-        if self.controller.active:
+        self.cancel_course_progress()
+        if self._course_controller.active:
+            if not self._course_controller.process.waitForFinished(1000):
+                self._course_controller.process.kill()
+                self._course_controller.process.waitForFinished(1000)
+        for login in list(self._browser_sessions):
+            login.shutdown()
+        if self.busy:
             if not self.controller.process.waitForFinished(3000):
                 self.controller.process.kill()
                 self.controller.process.waitForFinished(1000)
@@ -1629,7 +1819,7 @@ class Backend(QObject):
 
     @Slot(str)
     def fileAction(self, action):
-        if self.controller.active and action not in ("export_logs",):
+        if self.busy and action not in ("export_logs",):
             return
         def run():
             if action in ("import_config", "import_cookie"):
@@ -1685,7 +1875,7 @@ class Backend(QObject):
 
     @Slot()
     def chooseLogDirectory(self):
-        if self.controller.active:
+        if self.busy:
             return
         directory = QFileDialog.getExistingDirectory(None, "选择日志保存目录", self.summary['logDirectory'])
         if directory:

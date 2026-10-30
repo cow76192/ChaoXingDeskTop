@@ -121,6 +121,12 @@ class Controller(QObject):
         if not isinstance(event, dict) or not isinstance(event.get("type"), str):
             return False
         kind = event["type"]
+        if kind == 'course_progress':
+            from .course_progress import valid_progress
+            return valid_progress(event)
+        if kind in ('course_progress_loading', 'course_progress_failed'):
+            return all(isinstance(event.get(k), str) and 0 < len(event[k]) <= 256
+                       for k in ('courseId', 'clazzId', 'cpi'))
         if kind in ("courses", "tasks"):
             items = event.get(kind)
             return isinstance(items, list) and all(

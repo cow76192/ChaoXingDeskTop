@@ -101,6 +101,10 @@ class ChapterCompletionTests(unittest.TestCase):
                         first_statuses = [e['status'] for e in events
                                           if e['type'] == 'task' and e['id'] == 'course:class:0:0']
                         self.assertEqual(first_statuses, ['running', 'processed', expected])
+                        progress = [e for e in events if e['type'] == 'course_progress']
+                        self.assertEqual(len(progress), 1 if evidence is None else 2)
+                        self.assertEqual(progress[-1]['completed'], 1 if evidence else 0)
+                        self.assertEqual(progress[-1]['total'], 2)
                         self.assertEqual(client.get_course_point.call_count, 2)
                     return runtime.ChapterResult.SUCCESS
 

@@ -239,7 +239,7 @@ def real(channel, command):
     core = load_core(channel)
     checkpoint(channel)
     account_id = command.get('account_id')
-    verifying = command['action'] == 'verify'
+    verifying = command['action'] in ('verify', 'course_progress')
     if verifying and not account_id:
         raise ValueError('只读核验需要明确的账号会话。')
     if account_id:
@@ -260,7 +260,7 @@ def real(channel, command):
         raise ValueError('只读核验仅使用已读取课程的 Cookie 会话，请先重新读课。')
     if verifying:
         channel.send('verification_progress', phase='session', message='正在校验账号会话…', completed=0, total=0, reads=0, failures=0, elapsed_ms=0)
-    cx = core.create_client(command["config"], channel, courses_only=command["action"] in ('courses', 'verify'))
+    cx = core.create_client(command["config"], channel, courses_only=command["action"] in ('courses', 'verify', 'course_progress'))
     checkpoint(channel)
     login = cx.login(login_with_cookies=common["use_cookies"])
     if not login.get("status"):
@@ -284,6 +284,11 @@ def real(channel, command):
     if command["action"] == "courses":
         channel.send("courses", courses=courses, demo=False)
         return
+    if command['action'] == 'course_progress':
+        from .course_progress import refresh_progress
+        if command.get('selected'):
+            refresh_progress(cx, channel, select_courses(courses, command['selected']))
+        return
     if verifying:
         from .verification import verify_chapters
         verify_chapters(cx, channel, courses, command.get('targets', []), records=command.get('verify_records') is True)
@@ -297,9 +302,15 @@ def real(channel, command):
                     raise ValueError('无法复核课程会话')
         channel.control.resume_check = check_resumed_session
     tasks = []
+    from .course_progress import progress_identity, send_progress
     for course in chosen:
         checkpoint(channel)
+        channel.send('course_progress_loading', **progress_identity(course))
         points = cx.get_course_point(course["courseId"], course["clazzId"], course["cpi"])["points"]
+        try:
+            send_progress(channel, course, points)
+        except ValueError:
+            channel.send('course_progress_failed', **progress_identity(course))
         for i, point in enumerate(points):
             task = dict(id=f"{course['courseId']}:{course['clazzId']}:{point['id']}:{i}",
                         title=point["title"], course=course["title"], course_data=course, point=point)
@@ -311,11 +322,17 @@ def real(channel, command):
         # Accept each chapter immediately after processing; saving answers alone
         # is not proof of completion, even when the runner reports success.
         course = task['course_data']
+        channel.send('course_progress_loading', **progress_identity(course))
         try:
             points = cx.get_course_point(course["courseId"], course["clazzId"], course["cpi"])["points"]
+            try:
+                send_progress(channel, course, points)
+            except ValueError:
+                channel.send('course_progress_failed', **progress_identity(course))
             confirmed = any(str(p['id']) == str(task['point']['id']) and p.get('has_finished') is True
                             for p in points)
         except Exception as exc:
+            channel.send('course_progress_failed', **progress_identity(course))
             channel.send("log", message=f"无法核验章节进度：{exc}", level="WARNING")
             confirmed = False
         checkpoint(channel)

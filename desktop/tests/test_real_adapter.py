@@ -49,7 +49,10 @@ class RealAdapterTests(unittest.TestCase):
         self.assertEqual(events[-1]["type"], "done")
         self.assertEqual(events[-1]["success"], 1)
         self.assertEqual(events[-1]["pending"], 1)
-        self.assertEqual(len(events[0]["tasks"]), 2)
+        task_events = [event for event in events if event['type'] == 'tasks']
+        self.assertEqual(len(task_events), 1)
+        self.assertEqual(len(task_events[0]['tasks']), 2)
+        self.assertEqual({task['clazzId'] for task in task_events[0]['tasks']}, {'b'})
 
     def test_stale_selection_is_rejected(self):
         with self.assertRaises(ValueError):
