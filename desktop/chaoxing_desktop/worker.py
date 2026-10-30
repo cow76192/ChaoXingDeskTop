@@ -156,7 +156,7 @@ def demo(channel, command):
     channel.send("done", success=len(tasks), failed=0, skipped=0, pending=0, demo=True)
 
 
-def run_tasks(channel, tasks, process, config, result_enum):
+def run_tasks(channel, tasks, process, config, result_enum, verify=None):
     """Bounded chapter scheduling, retry in rounds so dependent chapters can unlock."""
     pending = list(tasks)
     statuses = {}
@@ -186,6 +186,10 @@ def run_tasks(channel, tasks, process, config, result_enum):
                 for future in completed:
                     task = futures.pop(future)
                     handle_result(future, task, attempt, retry, statuses, channel, config, result_enum)
+                    if verify is not None and statuses[task['id']] in ('processed', 'pending'):
+                        checkpoint(channel)
+                        statuses[task['id']] = verify(task)
+                        channel.send('task', id=task['id'], status=statuses[task['id']])
                 fill_slots()
         if not retry:
             break
@@ -318,10 +322,30 @@ def real(channel, command):
     channel.send("tasks", tasks=[dict({k: t[k] for k in ("id", "title", "course")},
                                     courseId=str(t['course_data']['courseId']),
                                     clazzId=str(t['course_data']['clazzId']), pointId=str(t['point']['id'])) for t in tasks])
+    def verify_task(task):
+        # Accept each chapter immediately after processing; saving answers alone
+        # is not proof of completion, even when the runner reports success.
+        course = task['course_data']
+        channel.send('course_progress_loading', **progress_identity(course))
+        try:
+            points = cx.get_course_point(course["courseId"], course["clazzId"], course["cpi"])["points"]
+            try:
+                send_progress(channel, course, points)
+            except ValueError:
+                channel.send('course_progress_failed', **progress_identity(course))
+            confirmed = any(str(p['id']) == str(task['point']['id']) and p.get('has_finished') is True
+                            for p in points)
+        except Exception as exc:
+            channel.send('course_progress_failed', **progress_identity(course))
+            channel.send("log", message=f"无法核验章节进度：{exc}", level="WARNING")
+            confirmed = False
+        checkpoint(channel)
+        return 'success' if confirmed else 'pending'
+
     statuses = run_tasks(channel, tasks,
                          lambda t: core.process_chapter(cx, t["course_data"], t["point"], common["speed"], t['id']),
-                         common, core.ChapterResult)
-    # Re-read platform state: saving answers is not completing an exercise.
+                         common, core.ChapterResult, verify=verify_task)
+    # Retain the final read for media whose platform confirmation arrives late.
     for course in chosen:
         checkpoint(channel)
         channel.send('course_progress_loading', **progress_identity(course))
@@ -331,14 +355,12 @@ def real(channel, command):
                 send_progress(channel, course, points)
             except ValueError:
                 channel.send('course_progress_failed', **progress_identity(course))
-            finished = {str(p["id"]): p.get("has_finished", False) for p in points}
+            finished = {str(p["id"]): p.get("has_finished") is True for p in points}
         except Exception as exc:
             channel.send('course_progress_failed', **progress_identity(course))
             channel.send("log", message=f"无法核验章节进度：{exc}", level="WARNING")
             finished = {}
         for task in tasks_by_course[(str(course["courseId"]), str(course["clazzId"]))]:
-            # An earlier media timeout may have settled on the platform while
-            # other chapters ran. Positive final evidence also resolves pending.
             if statuses[task["id"]] in ("processed", "pending"):
                 status = "success" if finished.get(str(task["point"]["id"]), False) else "pending"
                 statuses[task["id"]] = status
