@@ -91,6 +91,8 @@ class ChapterCompletionTests(unittest.TestCase):
                     RuntimeError('unavailable') if evidence is None else
                     {'points': [dict(points[0], has_finished=evidence), points[1]]},
                     {'points': [dict(p, has_finished=True) for p in points]},
+                    {'points': [dict(points[0], has_finished=evidence is True),
+                                dict(points[1], has_finished=True)]},
                 ]
                 output = io.StringIO()
                 channel = Channel(output, io.StringIO(), Redactor({}))
@@ -101,6 +103,10 @@ class ChapterCompletionTests(unittest.TestCase):
                         first_statuses = [e['status'] for e in events
                                           if e['type'] == 'task' and e['id'] == 'course:class:0:0']
                         self.assertEqual(first_statuses, ['running', 'processed', expected])
+                        progress = [e for e in events if e['type'] == 'course_progress']
+                        self.assertEqual(len(progress), 1 if evidence is None else 2)
+                        self.assertEqual(progress[-1]['completed'], 1 if evidence else 0)
+                        self.assertEqual(progress[-1]['total'], 2)
                         self.assertEqual(client.get_course_point.call_count, 2)
                     return runtime.ChapterResult.SUCCESS
 
@@ -114,7 +120,43 @@ class ChapterCompletionTests(unittest.TestCase):
                 self.assertEqual(done['success'], 2 if evidence else 1)
                 self.assertEqual(done['pending'], 0 if evidence else 1)
                 self.assertEqual(done['failed'], 0)
-                self.assertEqual(client.get_course_point.call_count, 3)
+                self.assertEqual(client.get_course_point.call_count, 4)
+                events = [json.loads(line) for line in output.getvalue().splitlines()]
+                progress = [e for e in events if e['type'] == 'course_progress']
+                self.assertEqual(progress[-1]['completed'], 2 if evidence else 1)
+                if evidence is None:
+                    self.assertTrue(any(e['type'] == 'course_progress_failed' for e in events))
+
+    def test_late_platform_confirmation_recovers_pending_and_updates_course_progress(self):
+        course = dict(courseId='course', clazzId='class', cpi='cpi', title='course')
+        point = dict(id='0', title='chapter', has_finished=False)
+        for final_evidence in (True, False, 'false'):
+            with self.subTest(final_evidence=final_evidence):
+                client = Mock()
+                client.login.return_value = {'status': True}
+                client.get_course_list.return_value = [course]
+                client.get_course_point.side_effect = [
+                    {'points': [point]}, {'points': [point]},
+                    {'points': [dict(point, has_finished=final_evidence)]},
+                ]
+                core = SimpleNamespace(create_client=lambda *args, **kw: client,
+                                       process_chapter=lambda *args: runtime.ChapterResult.PENDING,
+                                       ChapterResult=runtime.ChapterResult)
+                output = io.StringIO()
+                with patch('chaoxing_desktop.worker.load_core', return_value=core):
+                    real(Channel(output, io.StringIO(), Redactor({})),
+                         dict(action='run', config=to_payload(defaults()), selected=[['course', 'class']]))
+                events = [json.loads(line) for line in output.getvalue().splitlines()]
+                expected = 'success' if final_evidence is True else 'pending'
+                statuses = [e['status'] for e in events if e['type'] == 'task']
+                self.assertEqual(statuses, ['running', 'pending', 'pending', expected])
+                self.assertEqual(events[-1]['success'], int(final_evidence is True))
+                self.assertEqual(events[-1]['pending'], int(final_evidence is not True))
+                progress = [e for e in events if e['type'] == 'course_progress']
+                if type(final_evidence) is bool:
+                    self.assertEqual(progress[-1]['completed'], int(final_evidence))
+                else:
+                    self.assertTrue(any(e['type'] == 'course_progress_failed' for e in events))
 
     def test_timed_out_media_can_be_confirmed_by_final_platform_read(self):
         self.check_final_confirmation(StudyResult.TIMEOUT)
@@ -129,7 +171,8 @@ class ChapterCompletionTests(unittest.TestCase):
                 client.get_course_list.return_value = [course]
                 final = {'points': [dict(point, has_finished=confirmed)]}
                 client.get_course_point.side_effect = [
-                    {'points': [point]}, RuntimeError('unavailable') if confirmed is None else final]
+                    {'points': [point]}, RuntimeError('unavailable') if confirmed is None else final,
+                    RuntimeError('unavailable') if confirmed is None else final]
                 client.get_job_list.return_value = ([dict(type='video', name='video')], {})
                 client.study_video.return_value = media_result
                 core = SimpleNamespace(create_client=lambda *args, **kw: client,
