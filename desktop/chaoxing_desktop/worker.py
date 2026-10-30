@@ -294,6 +294,10 @@ def real(channel, command):
         verify_chapters(cx, channel, courses, command.get('targets', []), records=command.get('verify_records') is True)
         return
     chosen = select_courses(courses, command.get("selected", []))
+    from .course_progress import progress_identity, send_progress
+    from .task_completion import TaskCompletionCache
+    completion_cache = TaskCompletionCache(command["data_dir"], account_id, uid) if account_id else None
+    cached_ids = set()
     if channel.control:
         def check_resumed_session():
             for course in chosen:
@@ -303,13 +307,13 @@ def real(channel, command):
         channel.control.resume_check = check_resumed_session
     tasks = []
     tasks_by_course = {}
-    from .course_progress import progress_identity, send_progress
     for course in chosen:
         checkpoint(channel)
         course_tasks = []
         tasks_by_course[(str(course["courseId"]), str(course["clazzId"]))] = course_tasks
         channel.send('course_progress_loading', **progress_identity(course))
         points = cx.get_course_point(course["courseId"], course["clazzId"], course["cpi"])["points"]
+        completed = completion_cache.read(course) if completion_cache else {}
         try:
             send_progress(channel, course, points)
         except ValueError:
@@ -319,9 +323,25 @@ def real(channel, command):
                         title=point["title"], course=course["title"], course_data=course, point=point)
             tasks.append(task)
             course_tasks.append(task)
+            if str(point['id']) in completed:
+                cached_ids.add(task['id'])
+    chosen = [course for course in chosen
+              if any(t['id'] not in cached_ids
+                     for t in tasks_by_course[(str(course['courseId']), str(course['clazzId']))])]
     channel.send("tasks", tasks=[dict({k: t[k] for k in ("id", "title", "course")},
                                     courseId=str(t['course_data']['courseId']),
                                     clazzId=str(t['course_data']['clazzId']), pointId=str(t['point']['id'])) for t in tasks])
+    for task in tasks:
+        if task['id'] in cached_ids:
+            channel.send('task', id=task['id'], status='success')
+
+    def remember_success(task):
+        if completion_cache:
+            try:
+                completion_cache.save(task['course_data'], task['point'])
+            except (OSError, ValueError) as exc:
+                channel.send('log', level='WARNING', message=f"无法保存任务完成缓存：{exc}")
+
     def verify_task(task):
         # Accept each chapter immediately after processing; saving answers alone
         # is not proof of completion, even when the runner reports success.
@@ -340,11 +360,14 @@ def real(channel, command):
             channel.send("log", message=f"无法核验章节进度：{exc}", level="WARNING")
             confirmed = False
         checkpoint(channel)
+        if confirmed:
+            remember_success(task)
         return 'success' if confirmed else 'pending'
 
-    statuses = run_tasks(channel, tasks,
+    statuses = run_tasks(channel, [t for t in tasks if t['id'] not in cached_ids],
                          lambda t: core.process_chapter(cx, t["course_data"], t["point"], common["speed"], t['id']),
                          common, core.ChapterResult, verify=verify_task)
+    statuses.update({task_id: 'success' for task_id in cached_ids})
     # Retain the final read for media whose platform confirmation arrives late.
     for course in chosen:
         checkpoint(channel)
@@ -363,9 +386,11 @@ def real(channel, command):
         for task in tasks_by_course[(str(course["courseId"]), str(course["clazzId"]))]:
             if statuses[task["id"]] in ("processed", "pending"):
                 status = "success" if finished.get(str(task["point"]["id"]), False) else "pending"
+                if status == 'success':
+                    remember_success(task)
                 statuses[task["id"]] = status
                 channel.send("task", id=task["id"], status=status)
-    if common["add_learning_count"]:
+    if chosen and common["add_learning_count"]:
         channel.send("log", message="开始执行章节学习次数追加。", level="INFO")
         for course in chosen:
             core.increase_learning_count_for_course(cx, course, common)
