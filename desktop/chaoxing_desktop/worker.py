@@ -302,9 +302,12 @@ def real(channel, command):
                     raise ValueError('无法复核课程会话')
         channel.control.resume_check = check_resumed_session
     tasks = []
+    tasks_by_course = {}
     from .course_progress import progress_identity, send_progress
     for course in chosen:
         checkpoint(channel)
+        course_tasks = []
+        tasks_by_course[(str(course["courseId"]), str(course["clazzId"]))] = course_tasks
         channel.send('course_progress_loading', **progress_identity(course))
         points = cx.get_course_point(course["courseId"], course["clazzId"], course["cpi"])["points"]
         try:
@@ -315,6 +318,7 @@ def real(channel, command):
             task = dict(id=f"{course['courseId']}:{course['clazzId']}:{point['id']}:{i}",
                         title=point["title"], course=course["title"], course_data=course, point=point)
             tasks.append(task)
+            course_tasks.append(task)
     channel.send("tasks", tasks=[dict({k: t[k] for k in ("id", "title", "course")},
                                     courseId=str(t['course_data']['courseId']),
                                     clazzId=str(t['course_data']['clazzId']), pointId=str(t['point']['id'])) for t in tasks])
@@ -341,6 +345,26 @@ def real(channel, command):
     statuses = run_tasks(channel, tasks,
                          lambda t: core.process_chapter(cx, t["course_data"], t["point"], common["speed"], t['id']),
                          common, core.ChapterResult, verify=verify_task)
+    # Retain the final read for media whose platform confirmation arrives late.
+    for course in chosen:
+        checkpoint(channel)
+        channel.send('course_progress_loading', **progress_identity(course))
+        try:
+            points = cx.get_course_point(course["courseId"], course["clazzId"], course["cpi"])["points"]
+            try:
+                send_progress(channel, course, points)
+            except ValueError:
+                channel.send('course_progress_failed', **progress_identity(course))
+            finished = {str(p["id"]): p.get("has_finished") is True for p in points}
+        except Exception as exc:
+            channel.send('course_progress_failed', **progress_identity(course))
+            channel.send("log", message=f"无法核验章节进度：{exc}", level="WARNING")
+            finished = {}
+        for task in tasks_by_course[(str(course["courseId"]), str(course["clazzId"]))]:
+            if statuses[task["id"]] in ("processed", "pending"):
+                status = "success" if finished.get(str(task["point"]["id"]), False) else "pending"
+                statuses[task["id"]] = status
+                channel.send("task", id=task["id"], status=status)
     if common["add_learning_count"]:
         channel.send("log", message="开始执行章节学习次数追加。", level="INFO")
         for course in chosen:
