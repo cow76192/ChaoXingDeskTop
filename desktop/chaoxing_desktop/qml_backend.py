@@ -760,6 +760,7 @@ class Backend(QObject):
         lines = [f"账号：{'离线示例' if self.demo_mode else row['label'] if row else '未选择'}",
                  f"课程：已选 {len(self.selected)} 门（搜索隐藏 {self.summary['hiddenCount']} 门）",
                  f"章节并发 {c['common']['jobs']} · 倍速 {c['common']['speed']} · 重做 {'开启，最多 ' + c['common']['work_max_retries'] + ' 次' if on('common', 'work_redo_enabled') else '关闭'}",
+                 '完成缓存：' + ('忽略缓存，重新检查所选任务' if on('common', 'ignore_completion_cache') else '跳过缓存已完成任务'),
                  '题库顺序：' + (' → '.join(banks) or '关闭'),
                  f"AI {'开启' if on('ai', 'enabled') else '关闭'} · 图片识别 {'开启' if on('ai', 'vision') else '关闭'} · 人工 {'开启' if on('desktop', 'manual_fallback') else '关闭'} · 随机 {'开启' if on('desktop', 'random_fallback') else '关闭'}",
                  'AI 发送目标：' + (self.aiDestination if not self.demo_mode and on('ai', 'enabled') else '不发送'),

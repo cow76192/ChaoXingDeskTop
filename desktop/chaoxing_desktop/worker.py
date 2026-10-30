@@ -300,6 +300,7 @@ def real(channel, command):
     from .course_progress import progress_identity, send_progress
     from .task_completion import TaskCompletionCache
     completion_cache = TaskCompletionCache(command["data_dir"], account_id, uid) if account_id else None
+    ignore_completion_cache = common.get('ignore_completion_cache', False)
     cached_ids = set()
     if channel.control:
         def check_resumed_session():
@@ -326,7 +327,7 @@ def real(channel, command):
                         title=point["title"], course=course["title"], course_data=course, point=point)
             tasks.append(task)
             course_tasks.append(task)
-            if str(point['id']) in completed:
+            if not ignore_completion_cache and str(point['id']) in completed:
                 cached_ids.add(task['id'])
     chosen = [course for course in chosen
               if any(t['id'] not in cached_ids
@@ -338,12 +339,15 @@ def real(channel, command):
         if task['id'] in cached_ids:
             channel.send('task', id=task['id'], status='success')
 
-    def remember_success(task):
+    def remember_result(task, confirmed):
         if completion_cache:
             try:
-                completion_cache.save(task['course_data'], task['point'])
+                if confirmed:
+                    completion_cache.save(task['course_data'], task['point'])
+                elif ignore_completion_cache:
+                    completion_cache.remove(task['course_data'], task['point']['id'])
             except (OSError, ValueError) as exc:
-                channel.send('log', level='WARNING', message=f"无法保存任务完成缓存：{exc}")
+                channel.send('log', level='WARNING', message=f"无法更新任务完成缓存：{exc}")
 
     def verify_task(task):
         # Accept each chapter immediately after processing; saving answers alone
@@ -358,13 +362,15 @@ def real(channel, command):
                 channel.send('course_progress_failed', **progress_identity(course))
             confirmed = any(str(p['id']) == str(task['point']['id']) and p.get('has_finished') is True
                             for p in points)
+            if not confirmed and ignore_completion_cache:
+                remember_result(task, False)
         except Exception as exc:
             channel.send('course_progress_failed', **progress_identity(course))
             channel.send("log", message=f"无法核验章节进度：{exc}", level="WARNING")
             confirmed = False
         checkpoint(channel)
         if confirmed:
-            remember_success(task)
+            remember_result(task, True)
         return 'success' if confirmed else 'pending'
 
     statuses = run_tasks(channel, [t for t in tasks if t['id'] not in cached_ids],
@@ -382,6 +388,10 @@ def real(channel, command):
             except ValueError:
                 channel.send('course_progress_failed', **progress_identity(course))
             finished = {str(p["id"]): p.get("has_finished") is True for p in points}
+            if ignore_completion_cache:
+                for task in tasks_by_course[(str(course['courseId']), str(course['clazzId']))]:
+                    if not finished.get(str(task['point']['id']), False):
+                        remember_result(task, False)
         except Exception as exc:
             channel.send('course_progress_failed', **progress_identity(course))
             channel.send("log", message=f"无法核验章节进度：{exc}", level="WARNING")
@@ -390,7 +400,7 @@ def real(channel, command):
             if statuses[task["id"]] in ("processed", "pending"):
                 status = "success" if finished.get(str(task["point"]["id"]), False) else "pending"
                 if status == 'success':
-                    remember_success(task)
+                    remember_result(task, True)
                 statuses[task["id"]] = status
                 channel.send("task", id=task["id"], status=status)
     if common["add_learning_count"]:

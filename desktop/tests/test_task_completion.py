@@ -30,7 +30,8 @@ class TaskCompletionTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_worker(self, points=None, process=None, responses=None, verify=False, add_learning_count=True):
+    def run_worker(self, points=None, process=None, responses=None, verify=False, add_learning_count=True,
+                   ignore_completion_cache=False):
         points = self.points if points is None else points
         client = Mock(spec_set=['login', 'get_course_list', 'get_course_point'])
         client.login.return_value = dict(status=True)
@@ -47,7 +48,7 @@ class TaskCompletionTests(unittest.TestCase):
         session = SimpleNamespace(cookies=SimpleNamespace(get_dict=lambda: dict(_uid='uid')))
         config = to_payload(defaults())
         config['common'].update(username='fixture', password='', use_cookies=True, jobs=1,
-                                add_learning_count=add_learning_count)
+                                add_learning_count=add_learning_count, ignore_completion_cache=ignore_completion_cache)
         output = io.StringIO()
         with patch('chaoxing_desktop.worker.load_core', return_value=core), \
                 patch('chaoxing_desktop.accounts.AccountStore', return_value=store), \
@@ -150,6 +151,34 @@ class TaskCompletionTests(unittest.TestCase):
         core.process_chapter.assert_not_called()
         core.increase_learning_count_for_course.assert_called_once()
         self.assertEqual(core.increase_learning_count_for_course.call_args.args[1], self.course)
+
+    def test_ignore_cache_rechecks_completed_tasks_and_removes_stale_successes(self):
+        for point in self.points:
+            self.cache.save(self.course, point)
+        points = [dict(p, has_finished=False) for p in self.points]
+        _, core, events = self.run_worker(points=points, ignore_completion_cache=True)
+        self.assertEqual([c.args[2]['id'] for c in core.process_chapter.call_args_list], ['1', '2'])
+        self.assertEqual(events[-1]['pending'], 2)
+        self.assertEqual(self.cache.read(self.course), {})
+        _, core, _ = self.run_worker(points=points)
+        self.assertEqual(core.process_chapter.call_count, 2)
+
+    def test_ignore_cache_preserves_completion_when_requests_fail(self):
+        import requests
+        self.cache.save(self.course, self.points[0])
+        point = self.points[0]
+        self.run_worker(points=[point], ignore_completion_cache=True,
+                        responses=[dict(points=[point]), requests.Timeout('fixture'), requests.Timeout('fixture')])
+        self.assertEqual(set(self.cache.read(self.course)), {'1'})
+
+    def test_ignore_cache_can_confirm_and_cache_again(self):
+        for point in self.points:
+            self.cache.save(self.course, point)
+        _, core, events = self.run_worker(points=[dict(p, has_finished=True) for p in self.points],
+                                          ignore_completion_cache=True)
+        self.assertEqual(core.process_chapter.call_count, 2)
+        self.assertEqual(events[-1]['success'], 2)
+        self.assertEqual(set(self.cache.read(self.course)), {'1', '2'})
 
 
 if __name__ == '__main__':
