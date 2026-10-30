@@ -291,9 +291,12 @@ def real(channel, command):
         return
     if verifying:
         from .verification import verify_chapters
-        verify_chapters(cx, channel, courses, command.get('targets', []), records=command.get('verify_records') is True)
+        from .task_completion import TaskCompletionCache
+        verify_chapters(cx, channel, courses, command.get('targets', []), records=command.get('verify_records') is True,
+                        completion_cache=TaskCompletionCache(command['data_dir'], account_id, uid))
         return
     chosen = select_courses(courses, command.get("selected", []))
+    selected_courses = list(chosen)
     from .course_progress import progress_identity, send_progress
     from .task_completion import TaskCompletionCache
     completion_cache = TaskCompletionCache(command["data_dir"], account_id, uid) if account_id else None
@@ -390,9 +393,9 @@ def real(channel, command):
                     remember_success(task)
                 statuses[task["id"]] = status
                 channel.send("task", id=task["id"], status=status)
-    if chosen and common["add_learning_count"]:
+    if common["add_learning_count"]:
         channel.send("log", message="开始执行章节学习次数追加。", level="INFO")
-        for course in chosen:
+        for course in selected_courses:
             core.increase_learning_count_for_course(cx, course, common)
     counts = {s: list(statuses.values()).count(s) for s in ("success", "failed", "skipped", "pending")}
     checkpoint(channel)

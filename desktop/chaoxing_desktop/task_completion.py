@@ -51,3 +51,12 @@ class TaskCompletionCache:
             if len(body) > self.MAX_BYTES:
                 raise ValueError('任务完成缓存超过容量。')
             atomic_write(path, body)
+
+    def remove(self, course, point_id):
+        path = self.path(course)
+        with file_lock(path):
+            tasks = self.read(course)
+            if tasks.pop(str(point_id), None) is None:
+                return
+            body = json.dumps(dict(version=1, tasks=list(tasks.values())), ensure_ascii=False).encode('utf-8')
+            atomic_write(path, body)

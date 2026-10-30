@@ -30,7 +30,7 @@ class TaskCompletionTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_worker(self, points=None, process=None, responses=None):
+    def run_worker(self, points=None, process=None, responses=None, verify=False, add_learning_count=True):
         points = self.points if points is None else points
         client = Mock(spec_set=['login', 'get_course_list', 'get_course_point'])
         client.login.return_value = dict(status=True)
@@ -46,14 +46,19 @@ class TaskCompletionTests(unittest.TestCase):
         store = SimpleNamespace(get=lambda _: dict(username='fixture', uid='uid'), cookie_path=lambda _: cookie)
         session = SimpleNamespace(cookies=SimpleNamespace(get_dict=lambda: dict(_uid='uid')))
         config = to_payload(defaults())
-        config['common'].update(username='fixture', password='', use_cookies=True, jobs=1, add_learning_count=True)
+        config['common'].update(username='fixture', password='', use_cookies=True, jobs=1,
+                                add_learning_count=add_learning_count)
         output = io.StringIO()
         with patch('chaoxing_desktop.worker.load_core', return_value=core), \
                 patch('chaoxing_desktop.accounts.AccountStore', return_value=store), \
                 patch('api.cookies.configure_account'), patch('api.cookies.save_cookies'), \
                 patch.object(SessionManager, 'get_session', return_value=session):
-            real(Channel(output, io.StringIO(), Redactor({})), dict(
-                action='run', config=config, data_dir=self.tmp.name, account_id=self.account, selected=[['c', 'class']]))
+            command = dict(action='run', config=config, data_dir=self.tmp.name, account_id=self.account,
+                           selected=[['c', 'class']])
+            if verify:
+                command.update(action='verify', account_uid='uid', cookie_mtime_ns=cookie.stat().st_mtime_ns,
+                               targets=[dict(id='chapter-1', courseId='c', clazzId='class', pointId='1')])
+            real(Channel(output, io.StringIO(), Redactor({})), command)
         return client, core, [json.loads(line) for line in output.getvalue().splitlines()]
 
     def test_resume_skips_completed_task_with_real_title_and_starts_first_unfinished(self):
@@ -73,7 +78,8 @@ class TaskCompletionTests(unittest.TestCase):
         self.assertEqual(set(self.cache.read(self.course)), {'1', '2'})
         client, core, events = self.run_worker(points)
         core.process_chapter.assert_not_called()
-        core.increase_learning_count_for_course.assert_not_called()
+        core.increase_learning_count_for_course.assert_called_once()
+        self.assertEqual(core.increase_learning_count_for_course.call_args.args[1], self.course)
         self.assertEqual(client.get_course_point.call_count, 1)  # discover newly added chapters only
         self.assertEqual(events[-1]['success'], 2)
 
@@ -107,6 +113,43 @@ class TaskCompletionTests(unittest.TestCase):
         self.assertEqual(self.cache.read(self.course), {})
         _, core, _ = self.run_worker()
         self.assertEqual(core.process_chapter.call_count, 2)
+
+    def test_manual_confirmation_is_cached_and_used_on_next_run(self):
+        _, core, events = self.run_worker(verify=True)
+        self.assertEqual(set(self.cache.read(self.course)), {'1'})
+        self.assertTrue(next(e for e in events if e['type'] == 'verification')['confirmed'])
+        core.process_chapter.assert_not_called()
+        _, core, _ = self.run_worker(points=[dict(p, has_finished=False) for p in self.points])
+        self.assertEqual([c.args[2]['id'] for c in core.process_chapter.call_args_list], ['2'])
+
+    def test_manual_negative_confirmation_invalidates_only_target_cache(self):
+        for point in self.points:
+            self.cache.save(self.course, point)
+        _, _, events = self.run_worker(points=[dict(p, has_finished=False) for p in self.points], verify=True)
+        self.assertFalse(next(e for e in events if e['type'] == 'verification')['confirmed'])
+        self.assertEqual(set(self.cache.read(self.course)), {'2'})
+        _, core, _ = self.run_worker(points=[dict(p, has_finished=False) for p in self.points])
+        self.assertEqual([c.args[2]['id'] for c in core.process_chapter.call_args_list], ['1'])
+
+    def test_manual_missing_chapter_invalidates_cache_but_transport_failure_preserves_it(self):
+        import requests
+        self.cache.save(self.course, self.points[0])
+        _, _, events = self.run_worker(verify=True, responses=[requests.Timeout('fixture')])
+        self.assertTrue(any(e['type'] == 'verification_failed' for e in events))
+        self.assertEqual(set(self.cache.read(self.course)), {'1'})
+        self.run_worker(points=[self.points[1]], verify=True)
+        self.assertEqual(self.cache.read(self.course), {})
+
+    def test_all_cached_courses_still_honor_learning_count_switch(self):
+        for point in self.points:
+            self.cache.save(self.course, point)
+        _, core, _ = self.run_worker(add_learning_count=False)
+        core.process_chapter.assert_not_called()
+        core.increase_learning_count_for_course.assert_not_called()
+        _, core, _ = self.run_worker(add_learning_count=True)
+        core.process_chapter.assert_not_called()
+        core.increase_learning_count_for_course.assert_called_once()
+        self.assertEqual(core.increase_learning_count_for_course.call_args.args[1], self.course)
 
 
 if __name__ == '__main__':
