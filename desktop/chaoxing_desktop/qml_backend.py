@@ -29,6 +29,7 @@ from .run_history import RunHistory
 from .draft_copies import DraftCopies, make_copy, fingerprint, editable_source, constraints, export_text
 from .release_info import RELEASE_URLS, verification_info
 from .ai_profiles import AIProfiles
+from .course_progress import CourseProgressCache, progress_key, valid_progress
 
 
 class Backend(QObject):
@@ -161,6 +162,12 @@ class Backend(QObject):
         self.controller.finished.connect(self.on_finished)
         self.controller.busy_changed.connect(lambda _: self.busyChanged.emit())
         self.controller.busy_changed.connect(lambda busy: self.changed.emit() if busy else None)
+        self._course_progress = {}
+        self._course_progress_identity = None
+        self._course_refresh_pending = False
+        self._course_controller = Controller(self)
+        self._course_controller.event.connect(self.on_course_progress_event)
+        self._course_controller.finished.connect(self.on_course_progress_finished)
         self.configChanged.connect(self.refresh_redactor)
         self._account_rows_cache, self._cookie_exists = [], False
         self.verification_progress = {}
@@ -258,8 +265,101 @@ class Backend(QObject):
 
     @Property("QVariantList", notify=coursesChanged)
     def courseRows(self):
-        return [dict(c, selected=course_key(c) in self.selected) for c in self.courses
+        return [dict(c, selected=course_key(c) in self.selected,
+                     progress=self._course_progress.get(progress_key(c), dict(loading=False))) for c in self.courses
                 if self.course_visible(c)]
+
+    def course_progress_cache(self):
+        if self.demo_mode or not self.account_store or not self.account_store.active:
+            return None
+        account = self.account_store.get(self.account_store.active)
+        if account and account['uid']:
+            return CourseProgressCache(data_dir(), account['id'], account['uid'])
+        return None
+
+    def load_course_progress(self):
+        cache = self.course_progress_cache()
+        rows = cache.read() if cache else {}
+        self._course_progress = {
+            progress_key(c): dict(rows.get(progress_key(c), {}), loading=not self.demo_mode,
+                                  cached=progress_key(c) in rows, failed=False)
+            for c in self.courses}
+
+    def cancel_course_progress(self):
+        self._course_refresh_pending = False
+        self._course_progress_identity = None
+        self._course_controller.stop()
+        for row in self._course_progress.values():
+            row['loading'] = False
+        self.coursesChanged.emit()
+
+    def start_course_progress(self):
+        if self._closed or self.demo_mode or self.busy or not self.courses:
+            return
+        try:
+            if self.identity() != self.course_identity or self.course_progress_cache() is None:
+                return
+            if self._course_controller.active:
+                self._course_refresh_pending = True
+                return
+            config = defaults()
+            config['common'].update(username=self.config['common']['username'], password='', use_cookies='true')
+            self._course_progress_identity = self.identity()
+            account = self.account_store.get(self.account_store.active)
+            for row in self._course_progress.values():
+                row.update(loading=True, failed=False)
+            self.coursesChanged.emit()
+            self._course_controller.start(dict(
+                action='course_progress', demo=False, config=to_payload(config),
+                selected=[list(course_key(c)) for c in self.courses], data_dir=str(data_dir()),
+                account_id=account['id'], account_uid=account['uid'],
+                cookie_mtime_ns=self._course_progress_identity[-1]))
+        except (OSError, ValueError):
+            self.on_course_progress_finished(-1)
+
+    def apply_course_progress(self, event):
+        key = progress_key(event)
+        if key not in {progress_key(c) for c in self.courses}:
+            return
+        row = self._course_progress.setdefault(key, {})
+        kind = event['type']
+        if kind == 'course_progress_loading':
+            row.update(loading=True, failed=False)
+        elif kind == 'course_progress_failed':
+            row.update(loading=False, failed=True)
+        elif kind == 'course_progress' and valid_progress(event):
+            row.update({k: event[k] for k in ('completed', 'total', 'checked_at')})
+            row.update(loading=False, cached=False, failed=False)
+            cache = self.course_progress_cache()
+            if cache:
+                try:
+                    cache.save(event)
+                except (OSError, ValueError):
+                    pass  # A cache write failure must not interrupt learning.
+        self.coursesChanged.emit()
+
+    def on_course_progress_event(self, event):
+        try:
+            if self._course_progress_identity is None or self.identity() != self._course_progress_identity:
+                return
+        except OSError:
+            return
+        if event['type'] in ('course_progress', 'course_progress_loading', 'course_progress_failed'):
+            self.apply_course_progress(event)
+        elif event['type'] == 'input':
+            # Background statistics never interrupt the user with a login prompt.
+            self._course_controller.stop()
+
+    def on_course_progress_finished(self, code):
+        if self._course_progress_identity is not None:
+            for row in self._course_progress.values():
+                if row.get('loading'):
+                    row.update(loading=False, failed=True)
+            self.coursesChanged.emit()
+        self._course_progress_identity = None
+        pending, self._course_refresh_pending = self._course_refresh_pending, False
+        if pending:
+            QTimer.singleShot(0, self.start_course_progress)
 
     def course_visible(self, course):
         return not self.search or self.search.casefold() in (course["title"] + str(course["courseId"])).casefold()
@@ -677,6 +777,7 @@ class Backend(QObject):
                 'accounts.json 与 accounts/：账号索引与受保护的会话。DPAPI 绑定 Windows 用户和设备，复制文件不保证跨机解密。\n'
                 'discussions/ 与 activities/：草稿、正文／答案及发布／提交意图。内容未使用凭据加密封装；未决意图用于防重复，不能当缓存删除。\n'
                 'run_summaries/：按账号隔离的最近 20 轮摘要，每账号最多 2 MiB，每轮最多 1000 个未完成章节标题。包含课程名，不含题干或答案；每 2 秒最多保存一次。摘要不能作为提交证据，也不会自动重放请求。\n'
+                'course_progress/：按账号与平台用户隔离的章节进度缓存，每份最多 2000 门课程 / 1 MiB，只含课程标识、章节计数和更新时间。可安全删除，后台只读更新；不作为执行或提交凭据。\n'
                 'draft_copies/：按账号隔离的人工编辑副本，最多 20 项 / 2 MiB，含正文和原题，未加密。与生产草稿／意图独立，不能作为提交证据。\n'
                 'ai_profiles.json：最多 20 个命名 AI 配置；配置与独立凭据用 DPAPI 加密，不会自动切换服务。完整 INI 不包含这些档案。\n'
                 'logs/（或自选目录）：已脱敏日志，单文件约 10 MiB、总量 100 MiB、保留 14 天。课程与题目内容未自动匿名。日志导出仅含当前保留快照。\n\n'
@@ -735,6 +836,8 @@ class Backend(QObject):
         return self.account_store.cookie_path(self.account_store.active)
 
     def reset_account_view(self):
+        self.cancel_course_progress()
+        self._course_progress.clear()
         self._record_cards.clear()
         self.verification_progress = {}
         self._recovery = None
@@ -780,6 +883,7 @@ class Backend(QObject):
     def browserLogin(self):
         if self.busy:
             return
+        self.cancel_course_progress()
         def run():
             self.require_account_store()
             account_id = self.account_store.active
@@ -1016,6 +1120,7 @@ class Backend(QObject):
                 raise ValueError('请先启用并配置 AI，或选择随机选择与固定好。')
             validate(isolated, services=True)
             config = isolated
+        self.cancel_course_progress()
         self.operation, self.outcome = action, False
         self.ai_usage = dict(requests=0, limit=int(config['ai']['request_limit']), known=0, unknown=0, tokens=0)
         self._ai_token_warning = int(config['ai']['token_warning'])
@@ -1129,6 +1234,7 @@ class Backend(QObject):
             config = defaults()
             config['common'].update(username=self.config['common']['username'], password='', use_cookies='true')
             validate(config, login=True, cookie_path=self.cookie_path())
+            self.cancel_course_progress()
             self.operation, self.outcome = 'verify', False
             self.verification_progress = {}
             self.operation_account = self.account_store.active
@@ -1510,6 +1616,7 @@ class Backend(QObject):
             self.courses = event["courses"]
             self.demo_mode = event.get("demo", False)
             self.course_identity = self.identity()
+            self.load_course_progress()
             self.coursesChanged.emit()
             self.mode = "离线演示 · 示例数据" if self.demo_mode else "课程已读取"
             self.notify(f"已读取 {len(self.courses)} 门{'演示' if self.demo_mode else '真实'}课程。", "success")
@@ -1525,6 +1632,11 @@ class Backend(QObject):
                     self.notify(f'已重新读课并选择 {len(self.selected)} 门可定位课程，另有 {missing} 门未找到。请检查策略后手动开始；新轮会重读平台状态。', 'warning')
                 else:
                     self.notify('账号身份已变化，未恢复课程选择。请重新读取原账号课程。', 'warning')
+        elif kind in ('course_progress', 'course_progress_loading', 'course_progress_failed'):
+            if (not self.demo_mode and self.account_store and
+                    self.operation_account == self.account_store.active):
+                self.apply_course_progress(event)
+            return
         elif kind == "tasks":
             self._attention_model.clear()
             self._task_model.reset([dict(t, status="waiting") for t in event["tasks"]])
@@ -1616,6 +1728,8 @@ class Backend(QObject):
             if not saved:
                 self.history_error = error
             self._history_run = ''
+        if code == 0 and self.outcome and self.operation in ('courses', 'run', 'verify') and not self.controller.stopping:
+            QTimer.singleShot(0, self.start_course_progress)
         self.changed.emit()
 
     @Slot(result=bool)
@@ -1686,6 +1800,11 @@ class Backend(QObject):
                 self.notify(exc, "danger")
                 return False
         self.stop()
+        self.cancel_course_progress()
+        if self._course_controller.active:
+            if not self._course_controller.process.waitForFinished(1000):
+                self._course_controller.process.kill()
+                self._course_controller.process.waitForFinished(1000)
         for login in list(self._browser_sessions):
             login.shutdown()
         if self.busy:
