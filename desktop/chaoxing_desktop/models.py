@@ -3,7 +3,7 @@ from collections import Counter, deque
 
 from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt, QTimer, QSortFilterProxyModel
 
-STATUS = {"waiting": "等待", "running": "处理中", "processed": "等待核验", "retry": "等待重试",
+STATUS = {"waiting": "等待", "running": "处理中", "processed": "验收中", "retry": "等待重试",
           "success": "已完成", "failed": "失败", "skipped": "未开放 / 跳过", "pending": "待完成 / 未核验", "stopped": "已停止"}
 TERMINAL = {"success", "failed", "skipped", "pending", "stopped"}
 DATA_ROLE = int(Qt.ItemDataRole.UserRole) + 1

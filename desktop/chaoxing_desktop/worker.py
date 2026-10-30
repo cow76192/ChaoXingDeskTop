@@ -156,7 +156,7 @@ def demo(channel, command):
     channel.send("done", success=len(tasks), failed=0, skipped=0, pending=0, demo=True)
 
 
-def run_tasks(channel, tasks, process, config, result_enum):
+def run_tasks(channel, tasks, process, config, result_enum, verify=None):
     """Bounded chapter scheduling, retry in rounds so dependent chapters can unlock."""
     pending = list(tasks)
     statuses = {}
@@ -186,6 +186,10 @@ def run_tasks(channel, tasks, process, config, result_enum):
                 for future in completed:
                     task = futures.pop(future)
                     handle_result(future, task, attempt, retry, statuses, channel, config, result_enum)
+                    if verify is not None and statuses[task['id']] in ('processed', 'pending'):
+                        checkpoint(channel)
+                        statuses[task['id']] = verify(task)
+                        channel.send('task', id=task['id'], status=statuses[task['id']])
                 fill_slots()
         if not retry:
             break
@@ -293,39 +297,33 @@ def real(channel, command):
                     raise ValueError('无法复核课程会话')
         channel.control.resume_check = check_resumed_session
     tasks = []
-    tasks_by_course = {}
     for course in chosen:
         checkpoint(channel)
-        course_tasks = []
-        tasks_by_course[(str(course["courseId"]), str(course["clazzId"]))] = course_tasks
         points = cx.get_course_point(course["courseId"], course["clazzId"], course["cpi"])["points"]
         for i, point in enumerate(points):
             task = dict(id=f"{course['courseId']}:{course['clazzId']}:{point['id']}:{i}",
                         title=point["title"], course=course["title"], course_data=course, point=point)
             tasks.append(task)
-            course_tasks.append(task)
     channel.send("tasks", tasks=[dict({k: t[k] for k in ("id", "title", "course")},
                                     courseId=str(t['course_data']['courseId']),
                                     clazzId=str(t['course_data']['clazzId']), pointId=str(t['point']['id'])) for t in tasks])
-    statuses = run_tasks(channel, tasks,
-                         lambda t: core.process_chapter(cx, t["course_data"], t["point"], common["speed"], t['id']),
-                         common, core.ChapterResult)
-    # Re-read platform state: saving answers is not completing an exercise.
-    for course in chosen:
-        checkpoint(channel)
+    def verify_task(task):
+        # Accept each chapter immediately after processing; saving answers alone
+        # is not proof of completion, even when the runner reports success.
+        course = task['course_data']
         try:
             points = cx.get_course_point(course["courseId"], course["clazzId"], course["cpi"])["points"]
-            finished = {str(p["id"]): p.get("has_finished", False) for p in points}
+            confirmed = any(str(p['id']) == str(task['point']['id']) and p.get('has_finished') is True
+                            for p in points)
         except Exception as exc:
             channel.send("log", message=f"无法核验章节进度：{exc}", level="WARNING")
-            finished = {}
-        for task in tasks_by_course[(str(course["courseId"]), str(course["clazzId"]))]:
-            # An earlier media timeout may have settled on the platform while
-            # other chapters ran. Positive final evidence also resolves pending.
-            if statuses[task["id"]] in ("processed", "pending"):
-                status = "success" if finished.get(str(task["point"]["id"]), False) else "pending"
-                statuses[task["id"]] = status
-                channel.send("task", id=task["id"], status=status)
+            confirmed = False
+        checkpoint(channel)
+        return 'success' if confirmed else 'pending'
+
+    statuses = run_tasks(channel, tasks,
+                         lambda t: core.process_chapter(cx, t["course_data"], t["point"], common["speed"], t['id']),
+                         common, core.ChapterResult, verify=verify_task)
     if common["add_learning_count"]:
         channel.send("log", message="开始执行章节学习次数追加。", level="INFO")
         for course in chosen:

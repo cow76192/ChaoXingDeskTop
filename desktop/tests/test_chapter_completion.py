@@ -78,6 +78,44 @@ class ChapterCompletionTests(unittest.TestCase):
     def test_success_requires_platform_chapter_confirmation(self):
         self.check_final_confirmation(StudyResult.SUCCESS)
 
+    def test_each_chapter_is_verified_before_starting_next_chapter(self):
+        course = dict(courseId='course', clazzId='class', cpi='cpi', title='course')
+        points = [dict(id=str(i), title=f'chapter {i}', has_finished=False) for i in range(2)]
+        for evidence, expected in ((True, 'success'), (False, 'pending'), (None, 'pending')):
+            with self.subTest(evidence=evidence):
+                client = Mock()
+                client.login.return_value = {'status': True}
+                client.get_course_list.return_value = [course]
+                client.get_course_point.side_effect = [
+                    {'points': points},
+                    RuntimeError('unavailable') if evidence is None else
+                    {'points': [dict(points[0], has_finished=evidence), points[1]]},
+                    {'points': [dict(p, has_finished=True) for p in points]},
+                ]
+                output = io.StringIO()
+                channel = Channel(output, io.StringIO(), Redactor({}))
+
+                def process(client, course, point, speed, task_id):
+                    if point['id'] == '1':
+                        events = [json.loads(line) for line in output.getvalue().splitlines()]
+                        first_statuses = [e['status'] for e in events
+                                          if e['type'] == 'task' and e['id'] == 'course:class:0:0']
+                        self.assertEqual(first_statuses, ['running', 'processed', expected])
+                        self.assertEqual(client.get_course_point.call_count, 2)
+                    return runtime.ChapterResult.SUCCESS
+
+                core = SimpleNamespace(create_client=lambda *args, **kw: client,
+                                       process_chapter=process, ChapterResult=runtime.ChapterResult)
+                config = to_payload(defaults())
+                config['common']['jobs'] = 1
+                with patch('chaoxing_desktop.worker.load_core', return_value=core):
+                    real(channel, dict(action='run', config=config, selected=[['course', 'class']]))
+                done = json.loads(output.getvalue().splitlines()[-1])
+                self.assertEqual(done['success'], 2 if evidence else 1)
+                self.assertEqual(done['pending'], 0 if evidence else 1)
+                self.assertEqual(done['failed'], 0)
+                self.assertEqual(client.get_course_point.call_count, 3)
+
     def test_timed_out_media_can_be_confirmed_by_final_platform_read(self):
         self.check_final_confirmation(StudyResult.TIMEOUT)
 
