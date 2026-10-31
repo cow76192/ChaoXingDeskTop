@@ -1,0 +1,16 @@
+<Application x:Class="ChaoxingDesktop.App"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+ <Application.Resources>
+  <ResourceDictionary>
+   <ResourceDictionary.MergedDictionaries><XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls"/></ResourceDictionary.MergedDictionaries>
+   <SolidColorBrush x:Key="InkBrush" Color="#17243A"/>
+   <SolidColorBrush x:Key="MutedBrush" Color="#627086"/>
+   <SolidColorBrush x:Key="AccentBrush" Color="#2563EB"/>
+   <Style TargetType="Button"><Setter Property="CornerRadius" Value="6"/><Setter Property="Padding" Value="14,9"/><Setter Property="FontSize" Value="13"/></Style>
+   <Style TargetType="TextBox"><Setter Property="CornerRadius" Value="6"/><Setter Property="MinHeight" Value="38"/></Style>
+   <Style TargetType="PasswordBox"><Setter Property="CornerRadius" Value="6"/><Setter Property="MinHeight" Value="38"/></Style>
+   <Style TargetType="ComboBox"><Setter Property="CornerRadius" Value="6"/><Setter Property="MinHeight" Value="38"/><Setter Property="HorizontalAlignment" Value="Stretch"/></Style>
+  </ResourceDictionary>
+ </Application.Resources>
+</Application>
