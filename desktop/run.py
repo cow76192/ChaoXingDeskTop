@@ -10,7 +10,7 @@ if __name__ == "__main__":
     try:
         if "--legacy-qml" in sys.argv:
             from chaoxing_desktop.qml_app import main
-        else:
+        else:   
             from chaoxing_desktop.winui_app import main
         raise SystemExit(main())
     except Exception as exc:

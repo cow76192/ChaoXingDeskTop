@@ -14,11 +14,11 @@ public sealed partial class MainWindow
         var statGrid = new Grid { ColumnSpacing = 14 };
         string[] labels = ["本轮章节", "已核验章节", "待完成 / 未核验章节", "失败章节"];
         string[] keys = ["total", "success", "pending", "failed"];
-        string[] colors = ["#2563EB", "#15803D", "#B45309", "#DC2626"];
+        string[] colors = ["AccentBrush", "SuccessBrush", "WarningBrush", "ErrorBrush"];
         for (int i = 0; i < keys.Length; i++)
         {
             var key = keys[i]; var value = Text("0", 26); var label = Text(labels[i], 12);
-            value.Foreground = label.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(ParseColor(colors[i]));
+            value.Foreground = label.Foreground = ThemeBrush(colors[i]);
             chapterStatValues[key] = value;
             var card = Card(Column(value, label));
             statGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); statGrid.Children.Add(card); Grid.SetColumn(card, i);
@@ -29,11 +29,37 @@ public sealed partial class MainWindow
         refreshers.Add(() => progress.Value = J.I(Summary, "progress"));
         var tasks = new Grid { RowSpacing = 12 };
         tasks.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); tasks.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); tasks.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        var tools = new VariableSizedWrapGrid { Orientation = Orientation.Horizontal, MaximumRowsOrColumns = 5, ItemHeight = 44, ItemWidth = 150 };
-        tools.Children.Add(Button("只读核验章节", async () => await Call("verifyPending"), true));
-        tools.Children.Add(Button("核验本人讨论／活动", async () => await Call("verifyRecords"), true));
-        tools.Children.Add(Button("全量发现核验…", async () => { if (await Confirm("全量发现核验", "将读取当前课程的全部关联任务卡和本人证据，仅用于只读核验。", "开始只读核验")) await Call("verifyAllRecords"); }, true));
-        tools.Children.Add(Button("运行摘要…", () => { EnqueueDialog(ShowHistory); return Task.CompletedTask; }, true)); tools.Children.Add(Button("人工副本…", () => { EnqueueDialog(ShowSavedDrafts); return Task.CompletedTask; }, true));
+        var verifyChapters = Button("核验章节", async () => await Call("verifyPending"), true);
+        verifyChapters.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
+        ToolTipService.SetToolTip(verifyChapters, "只读检查待完成章节的平台进度");
+        var verifyRecords = Button("核验讨论与活动", async () => await Call("verifyRecords"), true);
+        var discover = new MenuFlyoutItem { Text = "全量发现核验…" };
+        discover.Click += (_, _) => EnqueueDialog(async () =>
+        {
+            if (await Confirm("全量发现核验", "将读取当前课程的全部关联任务卡和本人证据，仅用于只读核验。", "开始只读核验"))
+                await Call("verifyAllRecords");
+        });
+        var more = new DropDownButton { Content = "更多核验", Flyout = new MenuFlyout { Items = { discover } } };
+        idleControls.Add(more);
+        var verification = Row(verifyChapters, verifyRecords, more);
+        var records = Row(Button("运行摘要", () => { EnqueueDialog(ShowHistory); return Task.CompletedTask; }),
+            Button("人工副本", () => { EnqueueDialog(ShowSavedDrafts); return Task.CompletedTask; }));
+        var tools = new Grid { ColumnSpacing = 24, RowSpacing = 10, ChildrenTransitions = LayoutTransitions() };
+        tools.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        tools.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        tools.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        tools.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        tools.Children.Add(verification); tools.Children.Add(records);
+        void ArrangeTools()
+        {
+            bool narrow = tools.ActualWidth < 680;
+            Grid.SetColumnSpan(verification, narrow ? 2 : 1);
+            Grid.SetRow(records, narrow ? 1 : 0);
+            Grid.SetColumn(records, narrow ? 0 : 1);
+            Grid.SetColumnSpan(records, narrow ? 2 : 1);
+            records.HorizontalAlignment = narrow ? HorizontalAlignment.Left : HorizontalAlignment.Right;
+        }
+        tools.SizeChanged += (_, _) => ArrangeTools(); ArrangeTools();
         tasks.Children.Add(tools); tasks.Children.Add(progress); Grid.SetRow(progress, 1); tasks.Children.Add(taskList); Grid.SetRow(taskList, 2);
         var tabs = Tabs(("章节任务", tasks), ("逐题结果", FilteredResults("questions")), ("讨论记录", FilteredResults("discussions")), ("投票／问卷", FilteredResults("activities")), ("需处理", FilteredResults("attention")));
         var logSearch = new TextBox { PlaceholderText = "搜索当前保留日志", Width = 250 };

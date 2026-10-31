@@ -28,18 +28,88 @@ public sealed partial class MainWindow
         user.Width = 220;
         refreshers.Add(() => user.IsReadOnly = J.S(Summary, "activeAccount") != "");
         var password = BoundPassword("登录密码", "common", "password"); password.Width = 220;
-        var label = new TextBox { PlaceholderText = "账号备注", Width = 220 };
+        var label = new TextBox { Name = "AccountNote", Header = "当前账号备注", PlaceholderText = "为当前所选账号填写备注", Width = 280, MaxLength = 80 };
+        var noteTarget = Text("", 13);
+        noteTarget.Name = "AccountNoteTarget";
+        string noteAccountId = "", storedNote = "";
+        var saveNote = Button("保存当前账号备注", async () =>
+        {
+            if (noteAccountId.Length == 0 || J.S(Summary, "activeAccount") != noteAccountId ||
+                (accounts.SelectedItem as AccountItem)?.Id != noteAccountId)
+            {
+                Error("请先选择要管理的账号，等待账号切换完成后再保存备注。");
+                return;
+            }
+            await Call("renameAccount", label.Text);
+        });
+        saveNote.VerticalAlignment = VerticalAlignment.Bottom;
+        refreshers.Add(() =>
+        {
+            string activeId = J.S(Summary, "activeAccount");
+            var account = J.A(backend.State["accountRows"]).FirstOrDefault(row => J.S(row, "id") == activeId);
+            string savedLabel = J.S(account, "label");
+            bool changed = activeId != noteAccountId;
+            if (changed || savedLabel != storedNote && label.FocusState == FocusState.Unfocused)
+                label.Text = account == null ? "" : savedLabel;
+            noteAccountId = activeId;
+            storedNote = savedLabel;
+            string name = savedLabel;
+            string username = J.S(account, "username");
+            if (username.Length > 0 && username != name) name += "（" + username + "）";
+            noteTarget.Text = account == null ? "尚未选择账号，请先在上方选择或添加账号。" : "正在管理上方所选账号：" + name;
+            label.IsEnabled = saveNote.IsEnabled = account != null && !Busy;
+        });
+        var cookieStatus = Text("", 12, true);
+        var savedCookieLogin = Button("使用已保存 Cookie 进入课程", async () =>
+        {
+            await backend.Call("setValue", ["common", "use_cookies", "true"]);
+            await Call("fetchCourses");
+        }, true, "#2563EB");
+        savedCookieLogin.Name = "SavedCookieLogin";
+        var cookieEntry = new Border
+        {
+            Background = ThemeBrush("BannerBrush"), BorderBrush = ThemeBrush("BorderBrush"),
+            BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(16),
+            Child = Column(Text("已保存的登录会话", 15), cookieStatus,
+                Row(savedCookieLogin, Button("导入 Cookie", () => FileAction("fileAction", ["import_cookie"], false, "txt"), true))),
+        };
+        refreshers.Add(() =>
+        {
+            bool saved = J.B(Summary, "cookie");
+            savedCookieLogin.Visibility = saved ? Visibility.Visible : Visibility.Collapsed;
+            cookieStatus.Text = saved ? "当前账号已保存 Cookie，可直接连接并读取课程，无需填写密码。" : "当前账号尚无已保存的 Cookie，可导入 Cookie，或使用下方的其他登录方式。";
+        });
+        var passwordLogin = Button("使用账号密码进入课程", async () =>
+        {
+            await backend.Call("setValue", ["common", "use_cookies", "false"]);
+            await Call("fetchCourses");
+        }, true);
+        user.Width = password.Width = double.NaN;
+        var passwordForm = new Grid { ColumnSpacing = 8, ChildrenTransitions = LayoutTransitions() };
+        passwordForm.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        passwordForm.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        passwordForm.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        passwordForm.Children.Add(user); passwordForm.Children.Add(password); passwordForm.Children.Add(passwordLogin);
+        Grid.SetColumn(password, 1); Grid.SetColumn(passwordLogin, 2);
+        var clearCookie = Button("清除已保存 Cookie…", async () =>
+        {
+            if (await Confirm("清除 Cookie？", "清除当前账号的本机会话，下次使用需要重新登录。", "清除 Cookie"))
+                await Call("fileAction", "clear_cookie");
+        }, true);
+        clearCookie.VerticalAlignment = VerticalAlignment.Bottom;
         var detail = Column(
-                new Border { Height = 1, Background = new SolidColorBrush(ParseColor("#E2E7EF")), Margin = new Thickness(0, 6, 0, 6) },
-                Text("账户详情 / Cookie 登录", 16),
-                Row(user, password, Button("登录并读取", async () => await Call("fetchCourses"), true, "#2563EB")),
-                Row(label, Button("保存备注", async () => await Call("renameAccount", label.Text), true)),
-                Row(BoundToggle("Cookie 登录", "common", "use_cookies"), Button("导入 Cookie", () => FileAction("fileAction", ["import_cookie"], false, "txt"), true),
-                    Button("清除 Cookie", async () => { if (await Confirm("清除 Cookie？", "清除当前账号的本机会话，下次使用需要重新登录。", "清除 Cookie")) await Call("fileAction", "clear_cookie"); }, true)));
+                new Border { Height = 1, Background = ThemeBrush("BorderBrush"), Margin = new Thickness(0, 6, 0, 6) },
+                Text("其他登录方式", 16),
+                Row(Button("浏览器登录并进入课程", async () => await Call("browserLogin"), true), cancelLogin),
+                Text("账号密码登录", 13, true), passwordForm,
+                new Border { Height = 1, Background = ThemeBrush("BorderBrush"), Margin = new Thickness(0, 6, 0, 6) },
+                Text("账号管理", 16),
+                noteTarget,
+                Text("备注仅用于当前所选账号的显示名称，不影响其他账号。", 12, true),
+                Row(label, saveNote, clearCookie));
         var accountCard = Card(Column(Text("学习账户", 17), Text("多个账号可同时保留登录会话，Cookie 按账号加密保存。密码仅用于当前会话。", 12, true),
             StretchRow(accounts, Row(add, remove)),
-            Row(Button("浏览器登录", async () => await Call("browserLogin"), true, "#2563EB"), cancelLogin,
-                Button("重新读取课程", async () => await Call("fetchCourses"), true), Button("离线演示", async () => await Call("loadDemo"), true, "#7C3AED")), detail));
+            cookieEntry, detail, Button("离线演示", async () => await Call("loadDemo"), true)));
         accountCard.MaxWidth = 880;
         accountCard.HorizontalAlignment = HorizontalAlignment.Center;
         accountCard.VerticalAlignment = VerticalAlignment.Center;
@@ -66,6 +136,7 @@ public sealed partial class MainWindow
         var toolbar = StretchRow(courseCount, Row(search, Button("全选可见", async () => await Call("selectVisible", true), true), Button("取消选择", async () => await Call("selectVisible", false), true), ids));
         courses = new ListView { SelectionMode = ListViewSelectionMode.None, ItemTemplate = (DataTemplate)Root.Resources["CourseTemplate"], HorizontalContentAlignment = HorizontalAlignment.Stretch };
         courses.ItemContainerStyle = StretchListStyle();
+        idleControls.Add(courses);
         emptyCourses = Text("从连接账户开始\n读取课程，或点击「离线演示」体验完整流程。", 16, true);
         emptyCourses.HorizontalAlignment = HorizontalAlignment.Center; emptyCourses.VerticalAlignment = VerticalAlignment.Center;
         var courseArea = new Grid(); courseArea.Children.Add(courses); courseArea.Children.Add(emptyCourses);
@@ -108,6 +179,17 @@ public sealed partial class MainWindow
             await Call("selectCourse", J.S(row.Data, "courseId"), J.S(row.Data, "clazzId"), check.IsChecked == true);
     }
 
+    private async void CourseCardTapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
+    {
+        if (refreshing || Busy || sender is not Border { Tag: RecordRow row } card) return;
+        // A checkbox owns its click (including Space). Its bubbled tap must not
+        // toggle the same course for a second time.
+        for (DependencyObject? source = e.OriginalSource as DependencyObject; source != null && source != card; source = VisualTreeHelper.GetParent(source))
+            if (source is CheckBox) return;
+        e.Handled = true;
+        await Call("selectCourse", J.S(row.Data, "courseId"), J.S(row.Data, "clazzId"), !row.Selected);
+    }
+
     private TextBox BoundText(string title, string section, string key, bool multiline = false)
     {
         var input = new TextBox { PlaceholderText = title, Text = Value(section, key), HorizontalAlignment = HorizontalAlignment.Stretch, AcceptsReturn = multiline, TextWrapping = multiline ? TextWrapping.Wrap : TextWrapping.NoWrap, MinHeight = multiline ? 130 : 38 };
@@ -131,13 +213,14 @@ public sealed partial class MainWindow
         input.Toggled += async (_, _) => { if (!refreshing) await Call("setValue", section, key, input.IsOn ? "true" : "false"); };
         refreshers.Add(() => input.IsOn = Value(section, key) == "true"); return input;
     }
-    private StackPanel BuildGroups(string name)
+    private StackPanel BuildGroups(string name, FrameworkElement? headerAction = null, UIElement? footer = null)
     {
         var stack = Column();
         foreach (var group in J.A(backend.State["schema"]?[name]))
         {
-            var content = Column(Text(J.S(group, "title"), 18), Text(J.S(group, "description"), 12, true));
-            var form = new Grid { ColumnSpacing = 28, RowSpacing = 18 };
+            var title = Text(J.S(group, "title"), 18);
+            var content = Column(headerAction != null && stack.Children.Count == 0 ? StretchRow(title, headerAction) : title, Text(J.S(group, "description"), 12, true));
+            var form = new Grid { ColumnSpacing = 28, RowSpacing = 18, ChildrenTransitions = LayoutTransitions() };
             foreach (var spec in J.A(group["fields"])) { fieldGroups[J.S(spec, "section") + "." + J.S(spec, "key")] = name; form.Children.Add(BuildField(spec)); }
             void Arrange()
             {
@@ -151,6 +234,8 @@ public sealed partial class MainWindow
             form.SizeChanged += (_, _) => Arrange(); Arrange(); content.Children.Add(form);
             stack.Children.Add(Card(content));
         }
+        if (footer != null && stack.Children.LastOrDefault() is Border card && card.Child is StackPanel panel)
+            panel.Children.Add(footer);
         return stack;
     }
     private FrameworkElement BuildField(JsonNode spec)
@@ -188,7 +273,7 @@ public sealed partial class MainWindow
 
     private FrameworkElement BuildServices()
     {
-        var bankStack = Column(Text("题库服务", 18), Text("按顺序查询已启用的题库；展开编辑独立参数。", 12, true));
+        var bankStack = Column(StretchRow(Text("题库服务", 18), Button("离线检查配置", async () => await Call("offlineCheck"), true)), Text("按顺序查询已启用的题库；展开编辑独立参数。", 12, true));
         var bankMap = new Dictionary<string, string> { ["TikuGo"] = "bank_go", ["TikuYanxi"] = "bank_yanxi", ["TikuLike"] = "bank_like", ["TikuAdapter"] = "bank_adapter", ["TikuDeclarative"] = "bank_declarative" };
         var bankExpanders = new Dictionary<string, Expander>();
         foreach (var provider in J.A(backend.State["providers"]))
@@ -204,37 +289,66 @@ public sealed partial class MainWindow
                 Button("真实连接检查…", async () => { if (await Confirm("真实服务连接检查", "将向「" + title + "」发送一道最小测试题，可能消耗服务额度。", "发送测试题")) await Call("checkBank", key); }, true, "#7C3AED"));
             fieldGroups["question_bank." + secret] = bankMap[key];
             if (key == "TikuDeclarative") content.Children.Add(Row(Button("导入 JSON", () => FileAction("definitionAction", ["import"], false, "json"), true), Button("导出模板", () => FileAction("definitionAction", ["export"], true, "json", "question-bank"), true)));
-            var expander = new Expander { Header = Column(StretchRow(enabled, Row(up, down)), health), Content = content, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+            var header = Column(StretchRow(enabled, Row(up, down)), health);
+            header.Margin = new Thickness(0, 14, 0, 14);
+            header.Spacing = 14;
+            var expander = new Expander
+            {
+                Header = header,
+                Content = new Border { Padding = new Thickness(20, 16, 20, 20), Child = content },
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            };
             bankExpanders.Add(key, expander); bankStack.Children.Add(expander);
         }
         refreshers.Add(() => { int position = 2; foreach (var p in J.A(backend.State["providers"])) { var expander = bankExpanders[J.S(p, "key")]; if (bankStack.Children.IndexOf(expander) != position) { bankStack.Children.Remove(expander); bankStack.Children.Insert(position, expander); } position++; } });
-        bankStack.Children.Add(Button("离线检查配置", async () => await Call("offlineCheck"), true));
         var aiHealth = Text("尚未测试连接", 12, true);
         refreshers.Add(() => aiHealth.Text = J.S(backend.State["serviceHealth"], "ai") + "\n" + J.S(backend.State, "aiWarning"));
-        var ai = Column(Button("命名 AI 档案…", () => { EnqueueDialog(ShowProfiles); return Task.CompletedTask; }, true), BuildGroups("ai"), Button("测试 AI 连接…", async () => { if (await Confirm("主动测试 AI 服务", "将向当前配置的 AI 服务发送“回复 OK”，可能消耗额度。", "发送测试请求")) await Call("checkAi"); }, true, "#7C3AED"), aiHealth);
-        var serviceGrid = new Grid { ColumnSpacing = 16 };
+        var profileButton = Button("命名 AI 档案…", () => { EnqueueDialog(ShowProfiles); return Task.CompletedTask; }, true);
+        var aiFooter = Column(Button("测试 AI 连接…", async () => { if (await Confirm("主动测试 AI 服务", "将向当前配置的 AI 服务发送“回复 OK”，可能消耗额度。", "发送测试请求")) await Call("checkAi"); }, true, "#7C3AED"), aiHealth);
+        var ai = BuildGroups("ai", profileButton, aiFooter);
+        var serviceGrid = new Grid { Name = "ServiceColumns", ColumnSpacing = 16, RowSpacing = 20, ChildrenTransitions = LayoutTransitions() };
         serviceGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); serviceGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var banksScroll = Scroll(bankStack); var aiScroll = Scroll(ai); serviceGrid.Children.Add(banksScroll); serviceGrid.Children.Add(aiScroll); Grid.SetColumn(aiScroll, 1);
+        serviceGrid.RowDefinitions.Add(new RowDefinition());
+        serviceGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var banksScroll = Scroll(Card(bankStack)); var aiScroll = Scroll(ai);
+        banksScroll.Name = "BankSettings"; aiScroll.Name = "AiSettings";
+        serviceGrid.Children.Add(banksScroll); serviceGrid.Children.Add(aiScroll);
+        var servicesScroll = Scroll(serviceGrid); servicesScroll.Name = "ServicesScroll";
         bool aiSelected = false;
         void ArrangeServices()
         {
-            bool wide = serviceGrid.ActualWidth > 880;
-            banksScroll.Visibility = aiSelected ? Visibility.Collapsed : Visibility.Visible;
-            aiScroll.Visibility = aiSelected || wide ? Visibility.Visible : Visibility.Collapsed;
-            Grid.SetColumn(aiScroll, !aiSelected && wide ? 1 : 0);
-            Grid.SetColumnSpan(banksScroll, wide && !aiSelected ? 1 : 2);
-            Grid.SetColumnSpan(aiScroll, wide && !aiSelected ? 1 : 2);
+            bool wide = servicesScroll.ActualWidth > 880;
+            // A single scroll surface keeps AI reachable below the banks when
+            // narrow; wide windows retain two independently scrolling columns.
+            servicesScroll.VerticalScrollMode = wide ? ScrollMode.Disabled : ScrollMode.Enabled;
+            servicesScroll.VerticalScrollBarVisibility = wide ? ScrollBarVisibility.Disabled : ScrollBarVisibility.Auto;
+            serviceGrid.Height = wide ? servicesScroll.ActualHeight : double.NaN;
+            serviceGrid.RowDefinitions[0].Height = wide ? new GridLength(1, GridUnitType.Star) : GridLength.Auto;
+            foreach (var pane in new[] { banksScroll, aiScroll })
+            {
+                pane.VerticalScrollMode = wide ? ScrollMode.Enabled : ScrollMode.Disabled;
+                pane.VerticalScrollBarVisibility = wide ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled;
+                Grid.SetColumnSpan(pane, wide ? 1 : 2);
+            }
+            Grid.SetColumn(aiScroll, wide ? 1 : 0);
+            Grid.SetRow(aiScroll, wide ? 0 : 1);
         }
-        serviceGrid.SizeChanged += (_, _) => ArrangeServices(); ArrangeServices();
-        var tabs = Tabs(("服务连接", serviceGrid), ("答案处理", Scroll(BuildGroups("answers"))), ("结束通知", Scroll(BuildGroups("notification"))), ("讨论任务", PreviewSettings("discussion")), ("投票／问卷", PreviewSettings("activity")));
+        servicesScroll.SizeChanged += (_, _) => ArrangeServices(); ArrangeServices();
+        void RevealService(bool showAi)
+        {
+            aiSelected = showAi;
+            DispatcherQueue.TryEnqueue(() => (showAi ? ai : bankStack).StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 0, AnimationDesired = true }));
+        }
+        var tabs = Tabs(("服务连接", servicesScroll), ("答案处理", Scroll(BuildGroups("answers"))), ("结束通知", Scroll(BuildGroups("notification"))), ("讨论任务", PreviewSettings("discussion")), ("投票／问卷", PreviewSettings("activity")));
         var selector = (Pivot)tabs.Children[0]; selector.Margin = new Thickness(-12, 0, 110, 8);
         Button? aiSwitch = null;
-        aiSwitch = Button("AI 设置", () => { aiSelected = !aiSelected; aiSwitch!.Content = aiSelected ? "题库列表" : "AI 设置"; ArrangeServices(); return Task.CompletedTask; });
+        aiSwitch = Button("AI 设置", () => { RevealService(!aiSelected); aiSwitch!.Content = aiSelected ? "题库列表" : "AI 设置"; return Task.CompletedTask; });
         aiSwitch.HorizontalAlignment = HorizontalAlignment.Right; aiSwitch.VerticalAlignment = VerticalAlignment.Center; tabs.Children.Add(aiSwitch);
         revealServiceGroup = group =>
         {
             selector.SelectedIndex = group switch { "answers" => 1, "notification" => 2, "discussion" => 3, "activity" => 4, _ => 0 };
-            aiSelected = group == "ai"; aiSwitch.Content = aiSelected ? "题库列表" : "AI 设置"; ArrangeServices();
+            RevealService(group == "ai"); aiSwitch.Content = aiSelected ? "题库列表" : "AI 设置";
             foreach (var bank in bankExpanders) if (bankMap[bank.Key] == group) bank.Value.IsExpanded = true;
         };
         var pipeline = Text("01 题库查询     →     02 AI 补全     →     03 人工补全     →     04 随机补全", 14);
@@ -245,7 +359,7 @@ public sealed partial class MainWindow
             pipeline.Text = selector.SelectedIndex == 4 ? "01 发现活动     →     02 核实本人状态     →     03 逐题草稿     →     04 提交与分步核验" : selector.SelectedIndex == 3 ? "01 识别话题     →     02 检查本人回复     →     03 生成草稿     →     04 发布与核验" : "01 题库查询     →     02 AI 补全     →     03 人工补全     →     04 随机补全";
             pipelineHint.Text = selector.SelectedIndex == 4 ? "选择题与文本题分别配置 · 自动提交独立控制 · 提交未知时仅只读核验" : selector.SelectedIndex == 3 ? "只处理章节必做讨论 · 发布与任务完成分别确认，未知结果不重复提交" : "仅处理前一步未解决的题目 · 随机补全默认关闭，自动提交独立控制";
         };
-        var banner = Card(Column(pipeline, pipelineHint)); banner.Background = new SolidColorBrush(ParseColor("#EDF2FC")); banner.Padding = new Thickness(16);
+        var banner = Card(Column(pipeline, pipelineHint)); banner.Background = ThemeBrush("BannerBrush"); banner.Padding = new Thickness(16);
         var root = new Grid { RowSpacing = 16 }; root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); root.Children.Add(banner); root.Children.Add(tabs); Grid.SetRow(tabs, 1); return root;
     }
     private UIElement PreviewSettings(string kind)

@@ -17,9 +17,12 @@
     <SelfContained>true</SelfContained>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <DefaultItemExcludes>$(DefaultItemExcludes);dev*/**;publish*/**</DefaultItemExcludes>
     <RestorePackagesPath>../build/nuget</RestorePackagesPath>
   </PropertyGroup>
   <ItemGroup>
+    <Content Remove="dev*/**;publish*/**" />
+    <None Remove="dev*/**;publish*/**" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.4654" />
     <Content Include="../assets/app.ico" Link="app.ico" CopyToOutputDirectory="PreserveNewest" />

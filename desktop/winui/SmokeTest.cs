@@ -27,6 +27,7 @@ public sealed partial class MainWindow
         try
         {
             if (pages.Count != 5 || fields.Count < 40) throw new InvalidOperationException("页面或设置表单未加载。");
+            await CheckThemes();
             ShowCourseView(true, animate: false);
             if (showingMyCourses || CoursesReady || courseViews[1].Visibility != Visibility.Collapsed)
                 throw new InvalidOperationException("未登录时不应进入我的课程。");
@@ -38,6 +39,39 @@ public sealed partial class MainWindow
                 throw new InvalidOperationException("账号面板没有居中或超出可见区域。");
             if (fields["common.username"].ActualHeight < 20 || fields["common.password"].ActualHeight < 20)
                 throw new InvalidOperationException("账户详情未直接显示。");
+            var cookieLogin = VisualChild<Button>(accountConnectionCard, "SavedCookieLogin") ?? throw new InvalidOperationException("保存的 Cookie 缺少独立登录入口。");
+            var summary = (JsonObject)Summary!;
+            bool cookieSaved = J.B(summary, "cookie");
+            try
+            {
+                summary["cookie"] = true; Refresh(new JsonObject()); Root.UpdateLayout();
+                if (cookieLogin.Visibility != Visibility.Visible || !cookieLogin.Content.ToString()!.Contains("已保存 Cookie"))
+                    throw new InvalidOperationException("已保存 Cookie 没有显示直接进入课程的按钮。");
+                summary["cookie"] = false; Refresh(new JsonObject()); Root.UpdateLayout();
+                if (cookieLogin.Visibility != Visibility.Collapsed)
+                    throw new InvalidOperationException("尚未保存 Cookie 时显示了无效的登录入口。");
+            }
+            finally { summary["cookie"] = cookieSaved; Refresh(new JsonObject()); }
+            var originalAccounts = backend.State["accountRows"]?.DeepClone();
+            string originalActive = J.S(summary, "activeAccount");
+            try
+            {
+                backend.State["accountRows"] = new JsonArray(
+                    new JsonObject { ["id"] = "note-a", ["label"] = "学习账号 A", ["username"] = "user-a", ["display"] = "学习账号 A" },
+                    new JsonObject { ["id"] = "note-b", ["label"] = "学习账号 B", ["username"] = "user-b", ["display"] = "学习账号 B" });
+                var note = VisualChild<TextBox>(accountConnectionCard, "AccountNote")!;
+                var target = VisualChild<TextBlock>(accountConnectionCard, "AccountNoteTarget")!;
+                foreach (string suffix in new[] { "a", "b" })
+                {
+                    summary["activeAccount"] = "note-" + suffix; Refresh(new JsonObject());
+                    if (!target.Text.Contains("user-" + suffix) || note.Text != "学习账号 " + suffix.ToUpperInvariant())
+                        throw new InvalidOperationException("切换账号后备注归属或已有备注没有同步。");
+                    note.Text = "尚未保存的备注";
+                }
+                summary["activeAccount"] = ""; Refresh(new JsonObject());
+                if (note.IsEnabled || note.Text.Length > 0) throw new InvalidOperationException("未选择账号时不应编辑备注。");
+            }
+            finally { backend.State["accountRows"] = originalAccounts; summary["activeAccount"] = originalActive; Refresh(new JsonObject()); }
             for (int i = 0; i < pages.Count; i++)
             {
                 Navigation.SelectedIndex = i; Root.UpdateLayout(); await Task.Delay(80);
@@ -56,6 +90,7 @@ public sealed partial class MainWindow
             foreach (var expected in new[] { ("success", "#15803D"), ("pending", "#B45309"), ("failed", "#DC2626") })
                 if (chapterStatValues[expected.Item1].Foreground is not Microsoft.UI.Xaml.Media.SolidColorBrush brush || brush.Color != ParseColor(expected.Item2))
                     throw new InvalidOperationException("章节统计颜色不正确。");
+            await CheckResponsiveServices();
             Navigation.SelectedIndex = 0;
             await Call("loadDemo");
             await WaitFor(() => !Busy && J.I(Summary, "courseCount") == 3 && courses?.Items.Count == 3);
@@ -83,7 +118,7 @@ public sealed partial class MainWindow
             HideForClose();
             if (AppWindow.IsVisible || closeTimer.Elapsed > TimeSpan.FromSeconds(1))
                 throw new InvalidOperationException("关闭窗口仍在等待后台清理。");
-            success = true; message = "WinUI 3 章节详情完整显示、长内容滚动、弹窗居中、视频进度及快速关闭验收通过。";
+            success = true; message = "WinUI 3 系统/浅色/深色主题、主题保存、交互动效、宽窄布局和离线任务验收通过。";
         }
         catch (Exception e) { message = e.Message; }
         Directory.CreateDirectory(smokeDestination);
@@ -101,6 +136,98 @@ public sealed partial class MainWindow
             if (VisualChild<T>(child, name) is { } nested) return nested;
         }
         return null;
+    }
+
+    private async Task CheckThemes()
+    {
+        Navigation.SelectedIndex = 3;
+        await WaitFor(() => ThemeSelector.IsLoaded && !contentAnimations.ContainsKey(PageHost));
+        foreach (int selected in new[] { 2, 1, 2, 0, 1 })
+        {
+            ThemeSelector.SelectedIndex = selected;
+            await Task.Delay(280);
+            if (selected == 0 && Root.RequestedTheme != ElementTheme.Default ||
+                selected == 1 && Root.ActualTheme != ElementTheme.Light ||
+                selected == 2 && Root.ActualTheme != ElementTheme.Dark)
+                throw new InvalidOperationException("主题未正确切换。");
+            bool dark = Root.ActualTheme == ElementTheme.Dark;
+            foreach (var key in new[] { "WindowBrush", "SurfaceBrush", "InkBrush", "MutedBrush", "SuccessBrush", "WarningBrush", "ErrorBrush" })
+                if (ThemeBrush(key).Color != ParseColor(dark ? Palette[key].Dark : Palette[key].Light))
+                    throw new InvalidOperationException("主题配色未更新：" + key);
+            if (JsonSerializer.Deserialize<int>(await File.ReadAllTextAsync(appearancePath)) != selected)
+                throw new InvalidOperationException("主题偏好未保存。");
+            var dialog = Dialog("主题检查", ReadOnlyBody("主题检查"));
+            if (dialog.RequestedTheme != Root.RequestedTheme) throw new InvalidOperationException("弹窗没有跟随主题。");
+        }
+        ThemeSelector.SelectedIndex = 2; ThemeSelector.SelectedIndex = 1; ThemeSelector.SelectedIndex = 2; ThemeSelector.SelectedIndex = 1;
+        await Task.Delay(280);
+        if (ThemeBrush("SurfaceBrush").Color != ParseColor(Palette["SurfaceBrush"].Light))
+            throw new InvalidOperationException("快速切换主题没有停在最后选择。");
+        AttachInteractionMotion(Root);
+        if (SaveButton.RenderTransform is not ScaleTransform)
+            throw new InvalidOperationException("按钮交互动效未加载。");
+        foreach (int theme in new[] { 2, 1 })
+        {
+            ThemeSelector.SelectedIndex = theme;
+            await Task.Delay(280);
+            foreach (var button in new[] { SaveButton, VersionButton })
+            {
+                button.ApplyTemplate();
+                var presenter = VisualChild<ContentPresenter>(button) ?? throw new InvalidOperationException("按钮模板未加载。");
+                try
+                {
+                    foreach (var state in new[] { "PointerOver", "Pressed" })
+                    {
+                        if (!VisualStateManager.GoToState(button, state, false)) throw new InvalidOperationException("按钮状态未加载。");
+                        await Task.Delay(180);
+                        var expected = button == SaveButton ? (SolidColorBrush)button.Resources["ButtonBackground" + state] : ThemeBrush(state == "PointerOver" ? "HoverBrush" : "PressedBrush");
+                        if (presenter.Background is not SolidColorBrush actual || actual.Color != expected.Color)
+                            throw new InvalidOperationException("按钮悬停与按下配色未正确映射：" + state);
+                    }
+                }
+                finally { VisualStateManager.GoToState(button, "Normal", false); }
+            }
+        }
+        Navigation.SelectedIndex = 0;
+        await WaitFor(() => !contentAnimations.ContainsKey(PageHost));
+    }
+
+    private async Task CheckResponsiveServices()
+    {
+        Navigation.SelectedIndex = 2;
+        await WaitFor(() => !contentAnimations.ContainsKey(PageHost));
+        var original = AppWindow.Size;
+        double scale = GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96d;
+        try
+        {
+            foreach (int width in new[] { 1500, 980, 1500 })
+            {
+                AppWindow.Resize(new Windows.Graphics.SizeInt32((int)(width * scale), original.Height));
+                await Task.Delay(200); Root.UpdateLayout();
+                if (Grid.GetRow(HeaderActions) != 0 || Grid.GetColumn(HeaderActions) != 1)
+                    throw new InvalidOperationException("窗口变窄后保存设置移到了标题下方。");
+                var scroll = VisualChild<ScrollViewer>(pages[2], "ServicesScroll")!;
+                var banks = VisualChild<ScrollViewer>(pages[2], "BankSettings")!;
+                var ai = VisualChild<ScrollViewer>(pages[2], "AiSettings")!;
+                var grid = VisualChild<Grid>(pages[2], "ServiceColumns")!;
+                var bankPoint = banks.TransformToVisual(grid).TransformPoint(new Windows.Foundation.Point());
+                var aiPoint = ai.TransformToVisual(grid).TransformPoint(new Windows.Foundation.Point());
+                if (ai.Visibility != Visibility.Visible || ai.ActualHeight < 100)
+                    throw new InvalidOperationException("AI 设置在调整窗口大小后不可见。");
+                if (width == 980)
+                {
+                    if (aiPoint.Y < bankPoint.Y + banks.ActualHeight || scroll.ScrollableHeight <= 0)
+                        throw new InvalidOperationException("窄窗口没有将 AI 设置放在题库下方。");
+                    revealServiceGroup?.Invoke("ai");
+                    await Task.Delay(500); Root.UpdateLayout();
+                    if (scroll.VerticalOffset <= 0)
+                        throw new InvalidOperationException("窄窗口无法定位到 AI 设置。");
+                }
+                else if (aiPoint.X <= bankPoint.X || banks.ActualHeight > scroll.ActualHeight + 2)
+                    throw new InvalidOperationException("宽窗口没有恢复为左右并排布局。");
+            }
+        }
+        finally { AppWindow.Resize(original); }
     }
 
     private async Task CheckMonitorStability()

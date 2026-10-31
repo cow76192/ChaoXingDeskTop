@@ -40,15 +40,15 @@ public sealed class RecordRow : INotifyPropertyChanged
         Data = data;
         Title = J.S(data, "title", J.S(data, "question"));
         Selected = J.B(data, "selected");
-        StatusForeground = new SolidColorBrush(J.S(data, "status") switch
+        StatusForeground = (SolidColorBrush)Application.Current.Resources[J.S(data, "status") switch
         {
-            "success" => Color.FromArgb(255, 21, 128, 61),
-            "failed" => Color.FromArgb(255, 220, 38, 38),
-            "pending" or "processed" or "retry" or "stopped" => Color.FromArgb(255, 180, 83, 9),
-            "waiting" or "skipped" => Color.FromArgb(255, 98, 112, 134),
-            _ => Color.FromArgb(255, 37, 99, 235),
-        });
-        Background = new SolidColorBrush(Selected ? Color.FromArgb(255, 240, 245, 255) : Color.FromArgb(255, 255, 255, 255));
+            "success" => "SuccessBrush",
+            "failed" => "ErrorBrush",
+            "pending" or "processed" or "retry" or "stopped" => "WarningBrush",
+            "waiting" or "skipped" => "MutedBrush",
+            _ => "AccentBrush",
+        }];
+        Background = (SolidColorBrush)Application.Current.Resources[Selected ? "CourseSelectionBrush" : "SurfaceBrush"];
         var progress = data[course ? "progress" : "media"];
         ProgressVisibility = progress?[course ? "total" : "duration"] != null ? Visibility.Visible : Visibility.Collapsed;
         Progress = course ? 100.0 * J.I(progress, "completed") / Math.Max(1, J.I(progress, "total")) : J.I(progress, "percent");

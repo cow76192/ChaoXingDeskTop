@@ -43,6 +43,7 @@ public sealed partial class MainWindow : Window
     {
         InitializeComponent();
         ConfigureSmoke();
+        InitializeAppearance();
         Title = "超星学习工作台 · WinUI 3";
         var hwnd = WindowNative.GetWindowHandle(this);
         var appWindow = AppWindow.GetFromWindowId(Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd));
@@ -61,6 +62,7 @@ public sealed partial class MainWindow : Window
         backend.Failed += message => { if (!closing) Error(message); };
         Closed += (_, _) => backend.Dispose();
         Root.Loaded += (_, _) => { try { backend.Start(); } catch (Exception e) { Error(e.Message); } };
+        Root.Loaded += (_, _) => AttachInteractionMotion(Root);
     }
 
     [DllImport("user32.dll")]
@@ -72,8 +74,8 @@ public sealed partial class MainWindow : Window
         SidebarColumn.Width = new GridLength(narrow ? 184 : 216);
         PrivacyCard.Visibility = PageDescription.Visibility = narrow ? Visibility.Collapsed : Visibility.Visible;
         Workspace.Margin = new Thickness(Root.ActualHeight < 780 ? 16 : 24);
-        Grid.SetRow(HeaderActions, narrow ? 1 : 0);
-        Grid.SetColumn(HeaderActions, narrow ? 0 : 1);
+        Grid.SetRow(HeaderActions, 0);
+        Grid.SetColumn(HeaderActions, 1);
     }
 
     private async Task<JsonNode?> Call(string method, params object?[] args)
@@ -83,13 +85,14 @@ public sealed partial class MainWindow : Window
     }
     private void Error(string message) { if (closing) return; Notice.Message = message; Notice.Severity = InfoBarSeverity.Error; Notice.IsOpen = true; }
     private static TextBlock Text(string text, double size = 13, bool muted = false) => new() { Text = text, FontSize = size, TextWrapping = TextWrapping.Wrap, Foreground = (Brush)Application.Current.Resources[muted ? "MutedBrush" : "InkBrush"] };
-    private static StackPanel Column(params UIElement[] children) { var panel = new StackPanel { Spacing = 12 }; foreach (var child in children) panel.Children.Add(child); return panel; }
-    private static StackPanel Row(params UIElement[] children) { var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 }; foreach (var child in children) panel.Children.Add(child); return panel; }
+    private static StackPanel Column(params UIElement[] children) { var panel = new StackPanel { Spacing = 12, ChildrenTransitions = LayoutTransitions() }; foreach (var child in children) panel.Children.Add(child); return panel; }
+    private static StackPanel Row(params UIElement[] children) { var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, ChildrenTransitions = LayoutTransitions() }; foreach (var child in children) panel.Children.Add(child); return panel; }
     private static ScrollViewer Scroll(UIElement content) => new() { Content = content, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalContentAlignment = HorizontalAlignment.Stretch };
-    private static Border Card(UIElement content) => new() { Background = new SolidColorBrush(Microsoft.UI.Colors.White), BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 226, 231, 239)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Padding = new Thickness(20), Child = content };
+    private static Border Card(UIElement content) => new() { Background = ThemeBrush("SurfaceBrush"), BorderBrush = ThemeBrush("BorderBrush"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Padding = new Thickness(20), Child = content };
     private Button Button(string title, Func<Task> action, bool idle = false, string? color = null)
     {
         var button = new Button { Content = title };
+        button.Loaded += (_, _) => AttachInteractionMotion(button);
         AutomationProperties.SetName(button, title);
         if (color != null) { button.Background = new SolidColorBrush(ParseColor(color)); button.Foreground = new SolidColorBrush(Microsoft.UI.Colors.White); }
         button.Click += async (_, _) => { if (!refreshing) { try { await action(); } catch (Exception e) { Error(e.Message); } } };
@@ -145,9 +148,10 @@ public sealed partial class MainWindow : Window
         pages.Add(BuildCourses());
         pages.Add(Scroll(BuildGroups("learning")));
         pages.Add(BuildServices());
-        pages.Add(Scroll(Column(BuildGroups("advanced"), BuildBackup())));
+        pages.Add(Scroll(Column(BuildAppearance(), BuildGroups("advanced"), BuildBackup())));
         pages.Add(BuildMonitor());
         foreach (var page in pages) PageHost.Children.Add(page);
+        DispatcherQueue.TryEnqueue(() => AttachInteractionMotion(Root));
         Navigate(Navigation, null!);
     }
 
@@ -224,7 +228,8 @@ public sealed partial class MainWindow : Window
     }
     private ContentDialog Dialog(string title, UIElement content, string close = "关闭")
     {
-        var dialog = new ContentDialog { XamlRoot = Root.XamlRoot, Title = title, Content = content, CloseButtonText = close, RequestedTheme = ElementTheme.Light, DefaultButton = ContentDialogButton.Close };
+        var dialog = new ContentDialog { XamlRoot = Root.XamlRoot, Title = title, Content = content, CloseButtonText = close, RequestedTheme = Root.RequestedTheme, DefaultButton = ContentDialogButton.Close };
+        dialog.Opened += (_, _) => AttachInteractionMotion(dialog);
         // Limit the dialog surface, not the full-window popup layout root.
         dialog.Resources["ContentDialogMaxWidth"] = 800d;
         return dialog;

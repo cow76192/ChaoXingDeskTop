@@ -983,7 +983,7 @@ class Backend(QObject):
             self.config['common'].update(username=row['username'], password='',
                                          use_cookies='true' if self.cookie_path().exists() else 'false')
             self.reset_account_view()
-            self.notify('已切换到 ' + row['label'] + '，点击「登录并读取」获取该账号课程。')
+            self.notify('已切换到 ' + row['label'] + '，选择登录方式进入该账号课程。')
         self.execute(run)
 
     @Slot(str)
