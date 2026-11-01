@@ -338,7 +338,17 @@ public sealed partial class MainWindow
         void RevealService(bool showAi)
         {
             aiSelected = showAi;
-            DispatcherQueue.TryEnqueue(() => (showAi ? ai : bankStack).StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 0, AnimationDesired = true }));
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                servicesScroll.UpdateLayout();
+                if (servicesScroll.VerticalScrollMode == ScrollMode.Enabled)
+                {
+                    var target = showAi ? aiScroll : banksScroll;
+                    double top = target.TransformToVisual(serviceGrid).TransformPoint(new Windows.Foundation.Point()).Y;
+                    ScrollTo(servicesScroll, top);
+                }
+                else ScrollTo(showAi ? aiScroll : banksScroll, 0);
+            });
         }
         var tabs = Tabs(("服务连接", servicesScroll), ("答案处理", Scroll(BuildGroups("answers"))), ("结束通知", Scroll(BuildGroups("notification"))), ("讨论任务", PreviewSettings("discussion")), ("投票／问卷", PreviewSettings("activity")));
         var selector = (Pivot)tabs.Children[0]; selector.Margin = new Thickness(-12, 0, 110, 8);

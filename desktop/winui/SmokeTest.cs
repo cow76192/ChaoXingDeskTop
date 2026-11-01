@@ -18,7 +18,7 @@ public sealed partial class MainWindow
     private async Task WaitFor(Func<bool> predicate, int seconds = 20)
     {
         var deadline = DateTime.UtcNow.AddSeconds(seconds);
-        while (!predicate()) { if (DateTime.UtcNow > deadline) throw new TimeoutException("离线界面验收超时。"); await Task.Delay(50); }
+        while (!predicate()) { if (DateTime.UtcNow > deadline) throw new TimeoutException($"离线界面验收超时：page={Navigation.SelectedIndex}, ready={CoursesReady}, coursesShown={showingMyCourses}, pending={coursesLoadedPending}, animations={contentAnimations.Count}, busy={Busy}, message={J.S(Summary, "message")}。"); await Task.Delay(50); }
     }
     private async Task RunSmoke()
     {
@@ -26,6 +26,12 @@ public sealed partial class MainWindow
         bool success = false; string message;
         try
         {
+            // The packaging harness starts the process hidden. ScrollViewer's
+            // animated ChangeView needs rendered frames, so expose the test
+            // window before exercising interactive layout and scrolling.
+            AppWindow.Show();
+            Activate();
+            await Task.Delay(100);
             if (pages.Count != 5 || fields.Count < 40) throw new InvalidOperationException("页面或设置表单未加载。");
             await CheckThemes();
             ShowCourseView(true, animate: false);
@@ -94,6 +100,8 @@ public sealed partial class MainWindow
             Navigation.SelectedIndex = 0;
             await Call("loadDemo");
             await WaitFor(() => !Busy && J.I(Summary, "courseCount") == 3 && courses?.Items.Count == 3);
+            if (courses!.Items.OfType<RecordRow>().Any(row => !row.Title.Contains("演示")))
+                throw new InvalidOperationException("冻结后台的中文课程名称未正确传输。");
             await WaitFor(() => showingMyCourses && courseHost != null && !contentAnimations.ContainsKey(courseHost));
             if (courseViews[0].Visibility != Visibility.Collapsed || PageTitle.Text != "我的课程")
                 throw new InvalidOperationException("登录后未切换到独立课程视图。");
@@ -109,6 +117,20 @@ public sealed partial class MainWindow
             if (J.I(Summary, "total") == 0) throw new InvalidOperationException("章节任务没有同步。");
             await CheckMonitorStability();
             await CheckRecordDetails();
+            var discussion = J.A(backend.State["discussions"]).FirstOrDefault();
+            if (discussion != null)
+            {
+                var shown = ShowRecord("discussions", discussion);
+                try
+                {
+                    await WaitFor(() => currentDialog?.IsLoaded == true);
+                    var body = ((ScrollViewer)currentDialog!.Content).Content as TextBlock;
+                    if (body == null || !body.Text.Contains("处理阶段：") || !body.Text.Contains("任务点状态：") ||
+                        new[] { "id：", "run_id", "task_id", "elapsed_ms", "level:", "stage:" }.Any(body.Text.Contains))
+                        throw new InvalidOperationException("讨论详情泄露内部字段或缺少中文状态。");
+                }
+                finally { currentDialog?.Hide(); await shown; }
+            }
             if ((await Call("save"))?.ToString() != "true") throw new InvalidOperationException("设置未能保存。");
             // Also close during an active offline worker, using the normal save
             // handshake and hide path rather than merely terminating the app.
@@ -221,7 +243,7 @@ public sealed partial class MainWindow
                     revealServiceGroup?.Invoke("ai");
                     await Task.Delay(500); Root.UpdateLayout();
                     if (scroll.VerticalOffset <= 0)
-                        throw new InvalidOperationException("窄窗口无法定位到 AI 设置。");
+                        throw new InvalidOperationException($"窄窗口无法定位到 AI 设置：width={scroll.ActualWidth}, mode={scroll.VerticalScrollMode}, offset={scroll.VerticalOffset}, range={scroll.ScrollableHeight}, aiY={aiPoint.Y}, bankHeight={banks.ActualHeight}, gridHeight={grid.ActualHeight}, request={scroll.Tag}。");
                 }
                 else if (aiPoint.X <= bankPoint.X || banks.ActualHeight > scroll.ActualHeight + 2)
                     throw new InvalidOperationException("宽窗口没有恢复为左右并排布局。");

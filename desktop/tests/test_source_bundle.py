@@ -46,6 +46,7 @@ class SourceBundleTests(unittest.TestCase):
             "tests/live-response.json", "assets/private.pem",
             "winui/bin/MainWindow.xaml", "winui/obj/Generated.cs", "winui/publish/App.xaml",
             "winui/publish-motion/Generated.cs",
+            "winui/dev/MainWindow.xaml", "winui/dev-lean/Generated.cs",
             "vendor/chaoxing/resource/credentials.json",
         }
         with tempfile.TemporaryDirectory() as directory:

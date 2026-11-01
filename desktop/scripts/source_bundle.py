@@ -14,7 +14,7 @@ def source_files(desktop: Path):
     for path in (desktop / 'winui').rglob('*'):
         if (path.is_file() and not path.is_symlink()
                 and not {'bin', 'obj', 'publish'}.intersection(path.relative_to(desktop / 'winui').parts)
-                and not any(part.startswith('publish-') for part in path.relative_to(desktop / 'winui').parts)
+                and not any(part.startswith(('publish-', 'dev-')) or part == 'dev' for part in path.relative_to(desktop / 'winui').parts)
                 and path.suffix in {'.cs', '.xaml', '.csproj', '.manifest', '.md'}):
             files.append(path)
     for directory, extensions in (

@@ -16,6 +16,45 @@ public sealed partial class MainWindow
     private int mainPageIndex = -1;
     private double indicatorTarget;
     private const int ContentMotionMilliseconds = 260;
+    private readonly Dictionary<ScrollViewer, CancellationTokenSource> scrollAnimations = new();
+
+    private void ScrollTo(ScrollViewer viewer, double target)
+    {
+        if (scrollAnimations.Remove(viewer, out var previous)) previous.Cancel();
+        target = Math.Clamp(target, 0, viewer.ScrollableHeight);
+        if (!motionSettings.AnimationsEnabled)
+        {
+            viewer.ChangeView(null, target, null, disableAnimation: true);
+            return;
+        }
+        var cancellation = new CancellationTokenSource();
+        scrollAnimations[viewer] = cancellation;
+        _ = AnimateScroll(viewer, target, cancellation);
+    }
+
+    private async Task AnimateScroll(ScrollViewer viewer, double target, CancellationTokenSource cancellation)
+    {
+        double start = viewer.VerticalOffset;
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            while (!closing)
+            {
+                cancellation.Token.ThrowIfCancellationRequested();
+                double phase = Math.Min(1, elapsed.Elapsed.TotalMilliseconds / ContentMotionMilliseconds);
+                double eased = 1 - Math.Pow(1 - phase, 3);
+                viewer.ChangeView(null, Math.Clamp(start + (target - start) * eased, 0, viewer.ScrollableHeight), null, disableAnimation: true);
+                if (phase >= 1) break;
+                await Task.Delay(16, cancellation.Token);
+            }
+        }
+        catch (OperationCanceledException) { }
+        finally
+        {
+            if (scrollAnimations.GetValueOrDefault(viewer) == cancellation) scrollAnimations.Remove(viewer);
+            cancellation.Dispose();
+        }
+    }
 
     private static void Animate(Storyboard storyboard, DependencyObject target, string property,
                                 double from, double to, int milliseconds)
@@ -56,16 +95,21 @@ public sealed partial class MainWindow
         Animate(storyboard, incoming, "Opacity", 0, 1, ContentMotionMilliseconds);
         Animate(storyboard, outgoing.RenderTransform, "X", 0, -offset, ContentMotionMilliseconds);
         Animate(storyboard, outgoing, "Opacity", 1, 0, ContentMotionMilliseconds);
-        storyboard.Completed += (_, _) =>
+        void Complete()
         {
             if (contentAnimations.GetValueOrDefault(host) != storyboard) return;
             contentAnimations.Remove(host);
             outgoing.Visibility = Visibility.Collapsed;
             storyboard.Stop();
             outgoing.Opacity = incoming.Opacity = 1;
-        };
+        }
+        storyboard.Completed += (_, _) => Complete();
         contentAnimations[host] = storyboard;
         storyboard.Begin();
+        // Occluded/minimized windows may stop delivering rendering callbacks.
+        // Always settle on the latest page even if Completed is deferred.
+        _ = SettleAfterDelay();
+        async Task SettleAfterDelay() { await Task.Delay(ContentMotionMilliseconds + 80); Complete(); }
     }
 
     private static void ClipContent(Grid host)

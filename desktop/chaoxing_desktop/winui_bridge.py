@@ -184,6 +184,10 @@ class Bridge:
 
 
 def main():
+    # Frozen Python ignores PYTHONIOENCODING; the native pipe protocol is UTF-8.
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8')
     app = QCoreApplication(sys.argv)
     app.setApplicationName("ChaoxingDesktop")
     output = sys.stdout

@@ -23,7 +23,8 @@
   <ItemGroup>
     <Content Remove="dev*/**;publish*/**" />
     <None Remove="dev*/**;publish*/**" />
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001" />
+    <!-- Keep the WinUI dependency closure, without unused AI/ML/Widgets components. -->
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="1.8.260803003" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.4654" />
     <Content Include="../assets/app.ico" Link="app.ico" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

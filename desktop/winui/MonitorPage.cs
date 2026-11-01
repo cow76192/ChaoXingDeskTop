@@ -121,7 +121,8 @@ public sealed partial class MainWindow
         if (kind == "tasks" || kind == "attention") { await ShowText(J.S(row, "title"), ChapterDetailText(row)); return; }
         var method = kind == "questions" ? "questionDetail" : kind == "discussions" ? "discussionDetail" : "activityDetail";
         var record = await Call(method, J.S(row, "id")) ?? row;
-        var text = J.S(record, "detailText"); if (text.Length == 0) text = DetailText(record);
+        var text = J.S(record, "detailText");
+        if (text.Length == 0) text = kind == "discussions" ? DiscussionDetailText(record) : DetailText(record);
         var body = ReadOnlyBody(text);
         var dialog = Dialog(J.S(row, "title", "记录详情"), body);
         if (kind != "questions")
@@ -158,6 +159,15 @@ public sealed partial class MainWindow
         Add("班级编号", J.S(row, "clazzId"));
         Add("章节编号", J.S(row, "pointId"));
         return string.Join("\n\n", lines);
+    }
+    private static string DiscussionDetailText(JsonNode row)
+    {
+        // Older/partial backend responses must never fall back to raw identifiers.
+        (string Key, string Label)[] fields = [("course", "课程"), ("chapter", "章节"), ("title", "讨论主题"),
+            ("stageText", "处理阶段"), ("taskText", "任务点状态"), ("levelText", "回复方式"),
+            ("sourceText", "内容来源"), ("reason", "处理说明"), ("content", "回复正文")];
+        return string.Join("\n\n", fields.Where(field => J.S(row, field.Key).Length > 0)
+            .Select(field => field.Label + "：" + J.S(row, field.Key)));
     }
     private static string DetailText(JsonNode node)
     {

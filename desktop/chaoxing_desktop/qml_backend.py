@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Property, Signal, Slot, QTimer
-from PySide6.QtWidgets import QFileDialog
+from .file_dialogs import FileDialogs as QFileDialog
 
 from . import __version__
 from .answers import option_pairs, plain_text, question_images
@@ -207,7 +207,6 @@ class Backend(QObject):
     @Slot(str)
     def releaseAction(self, action):
         if action == 'copy':
-            from PySide6.QtGui import QGuiApplication
             self.copy_text(verification_info())
             self.feedback('release', '版本与校验说明已复制；不含账号、凭据或数据目录。', 'success')
         elif action in RELEASE_URLS:
@@ -585,7 +584,6 @@ class Backend(QObject):
                 raise ValueError('存在未进入副本的超容量／非法输入，请先修正后再复制／导出。')
             text = export_text(self._draft)
             if clipboard:
-                from PySide6.QtGui import QGuiApplication
                 self.copy_text(text)
                 self.feedback('draft', '人工编辑副本已复制，未触发提交。', 'success')
             else:
@@ -1289,7 +1287,6 @@ class Backend(QObject):
 
     @Slot(str)
     def copyActivity(self, record_id):
-        from PySide6.QtGui import QGuiApplication
         record = self._activity_model.detail(record_id)
         if record:
             self.copy_text(record['detailText'])
@@ -1340,7 +1337,6 @@ class Backend(QObject):
 
     @Slot(str)
     def copyDiscussion(self, record_id):
-        from PySide6.QtGui import QGuiApplication
         record = self._discussion_model.detail(record_id)
         if record.get('content'):
             self.copy_text(record['content'])

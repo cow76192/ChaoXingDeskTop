@@ -4,7 +4,7 @@
 
 主页面和页内分类采用滑动淡入动画，侧栏选中指示条连续移动；快速切换以最后选择为准，并遵循 Windows 的动画开关。账号连接与“我的课程”使用独立视图，成功读课后向右滑入课程，可返回账号管理；切换账号后重新连接。章节统计和任务状态采用绿色已核验、琥珀色待完成、红色失败。
 
-界面使用 Windows App SDK 1.8.260921001，自包含、非 MSIX 部署，不要求用户另装 .NET 或 Windows App Runtime。开发机需要 Windows 10 2004（19041）或更高、x64、.NET 8 SDK；Windows SDK 构建工具通过固定版本 NuGet 包还原。[微软非打包部署说明](https://learn.microsoft.com/windows/apps/package-and-deploy/unpackage-winui-app)
+界面使用 Windows App SDK 1.8 的 WinUI 组件包（1.8.260803003）及其依赖，自包含、非 MSIX 部署，不要求用户另装 .NET 或 Windows App Runtime。开发机需要 Windows 10 2004（19041）或更高、x64、.NET 8 SDK；Windows SDK 构建工具通过固定版本 NuGet 包还原。[微软非打包部署说明](https://learn.microsoft.com/windows/apps/package-and-deploy/unpackage-winui-app)
 
 ## 开发运行
 
@@ -36,6 +36,14 @@ python -m venv .venv
 `BackendClient.cs` 启动后台子进程，以继承的标准输入／输出交换 JSON 行，没有监听端口。`chaoxing_desktop/winui_bridge.py` 使用明确命令白名单、帧大小限制和合并更新，把现有业务状态与模型交给界面。文件选择、剪贴板、确认和人工补全由 WinUI 控件处理。原有 DPAPI、账号隔离、三类独立提交开关、提交确认、未知结果防重和设置验证继续在 Python 业务层执行。
 
 Qt Core 及现有 Python 依赖保留在后台；这次迁移没有重写平台、题库或 AI 协议。QML 文件与既有界面回归暂留作迁移参考；仅显式传 `run.py --legacy-qml` 才启动旧界面，原生启动失败不会自动切回。
+
+## 依赖精简
+
+前端仅引用 WinUI 组件依赖，不引入 Windows App SDK 元包中的 AI、ML、Widgets 等未使用组件。Python 后台保留 Qt Core、Network、WebSockets 与图片编解码所需的 Qt Gui；旧文件对话框延迟加载，原生后台包排除 Qt Widgets、QML、Qt Quick、浏览器和 PDF 模块。后台裁剪仅保留图片、TLS、网络信息插件，不携带窗口平台插件、样式、翻译和软件 OpenGL。OCR 引擎及 `common_old.onnx` 模型继续保留；冻结发布必须通过 `tests/release_smoke.py --worker-only`，覆盖图片编码和 OCR，不能用源码离线验收代替。
+
+构建和发布应使用新的空输出目录，以免上次构建留下的可选运行库影响体积统计。
+
+OCR 在媒体进度上报遇到图片验证码时按需初始化（`api/base.py` → `CaptchaRecovery.recover` → `ocr_init`），不是仅供验收使用。当前锁定的 ddddocr 在模块导入时强制加载 OpenCV，不能只删除 `cv2.pyd`；ONNX Runtime、NumPy 和识别模型也属于这条调用链。原生后台排除 NumPy 的 `_multiarray_tests` 测试扩展，安装包复制阶段排除 `.pdb` 调试符号；许可证、来源归档和依赖元数据继续保留。
 
 ## 验证
 

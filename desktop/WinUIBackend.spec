@@ -29,12 +29,13 @@ a = Analysis(
     datas=[(str(root / 'vendor/chaoxing/resource'), 'vendor/chaoxing/resource')]
           + collect_data_files('ddddocr', includes=['common_old.onnx']) + metadata,
     hiddenimports=collect_submodules('api') + ['chaoxing_desktop.runtime', 'lxml.etree', 'pyaes'],
-    excludes=['PySide6.QtQuick', 'PySide6.QtQml', 'PySide6.QtQuickControls2',
+    excludes=['PySide6.QtWidgets', 'chaoxing_desktop.qml_app',
+              'PySide6.QtQuick', 'PySide6.QtQml', 'PySide6.QtQuickControls2',
               'PySide6.QtWebEngineCore', 'PySide6.QtWebEngineWidgets', 'PySide6.QtWebEngineQuick',
               'PySide6.QtPdf', 'PySide6.QtPdfWidgets', 'tkinter', 'celery', 'flask'],
     noarchive=False,
 )
-a.binaries, a.datas = trim_bundle(a.binaries, a.datas)
+a.binaries, a.datas = trim_bundle(a.binaries, a.datas, native_backend=True)
 pyz = PYZ(a.pure)
 worker = EXE(pyz, a.scripts, [], exclude_binaries=True, name='ChaoxingWorker',
              console=True, strip=False, upx=False, icon=str(root / 'assets/app.ico'),

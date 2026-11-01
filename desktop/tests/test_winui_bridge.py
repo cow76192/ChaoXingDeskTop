@@ -81,6 +81,13 @@ class WinUIBridgeTests(unittest.TestCase):
         self.assertIn('error', self.call('on_event', {'type': 'done'}))
         self.assertTrue(self.call('save')['result'])
 
+    def test_unicode_account_label_roundtrip(self):
+        cookie = Path(self.directory.name) / 'synthetic-cookie.txt'
+        cookie.write_text('_uid=test-uid; session=synthetic', encoding='utf-8')
+        self.call('fileAction', 'import_cookie', path=str(cookie))
+        self.call('renameAccount', '中文备注 · 验收账号')
+        self.assertEqual(self.state['accountRows'][0]['label'], '中文备注 · 验收账号')
+
     def test_native_file_picker_path_and_clipboard(self):
         path = Path(self.directory.name) / '诊断.ini'
         self.call('fileAction', 'export_diagnostics', path=str(path))
