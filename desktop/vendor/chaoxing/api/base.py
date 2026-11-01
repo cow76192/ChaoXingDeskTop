@@ -754,7 +754,9 @@ class Chaoxing:
                         duration = int(refreshed_meta["duration"])
                         refreshed_play_time = refreshed_meta.get("playTime")
                         if refreshed_play_time is not None:
-                            play_time = min(duration, max(0, int(refreshed_play_time)))
+                            # A stale server checkpoint must not replay time
+                            # already elapsed locally during this media task.
+                            play_time = min(duration, max(play_time, 0, int(refreshed_play_time)))
 
                         logger.debug("刷新后的持续时间: {}, 播放时间: {}", duration, play_time)
                         next_report_at = time.monotonic()

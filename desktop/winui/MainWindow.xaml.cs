@@ -19,6 +19,7 @@ public sealed partial class MainWindow : Window
     private readonly List<Action> refreshers = new();
     private readonly List<Control> idleControls = new();
     private readonly Dictionary<string, Control> fields = new();
+    private readonly HashSet<string> correctingFields = new();
     private readonly Dictionary<string, string> fieldGroups = new();
     private Action<string>? revealServiceGroup;
     private readonly Dictionary<string, ListView> resultLists = new();

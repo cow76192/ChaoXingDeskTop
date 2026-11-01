@@ -208,10 +208,10 @@ public sealed partial class MainWindow
     }
     private ToggleSwitch BoundToggle(string title, string section, string key)
     {
-        var input = new ToggleSwitch { Header = title, IsOn = Value(section, key) == "true", OnContent = "已启用", OffContent = "已关闭" };
+        var input = new ToggleSwitch { Header = title, IsOn = Value(section, key).Equals("true", StringComparison.OrdinalIgnoreCase), OnContent = "已启用", OffContent = "已关闭" };
         fields[section + "." + key] = input; idleControls.Add(input);
         input.Toggled += async (_, _) => { if (!refreshing) await Call("setValue", section, key, input.IsOn ? "true" : "false"); };
-        refreshers.Add(() => input.IsOn = Value(section, key) == "true"); return input;
+        refreshers.Add(() => input.IsOn = Value(section, key).Equals("true", StringComparison.OrdinalIgnoreCase)); return input;
     }
     private StackPanel BuildGroups(string name, FrameworkElement? headerAction = null, UIElement? footer = null)
     {
@@ -267,7 +267,24 @@ public sealed partial class MainWindow
         if (J.S(spec, "hint") is { Length: > 0 } hint) panel.Children.Add(Text(hint, 12, true));
         if (kind is "integer" or "number") panel.Children.Add(Text($"范围：{J.S(spec, "low")}–{J.S(spec, "high")}", 11, true));
         if (spec["depends"] is JsonObject dependency && J.S(dependency, "key") != "")
-            refreshers.Add(() => input.IsEnabled = !Busy && Value(J.S(dependency, "section"), J.S(dependency, "key")) == J.S(dependency, "value"));
+        {
+            string fieldId = section + "." + key;
+            refreshers.Add(() => input.IsEnabled = !Busy && (correctingFields.Contains(fieldId) ||
+                Value(J.S(dependency, "section"), J.S(dependency, "key")).Equals(J.S(dependency, "value"), StringComparison.OrdinalIgnoreCase)));
+            // Keep correction available throughout incomplete edits and backend
+            // refreshes; release it only on blur with an acceptable value.
+            input.LostFocus += (_, _) =>
+            {
+                string value = Value(section, key);
+                bool valid = kind is "integer" or "number"
+                    ? double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double number)
+                        && double.IsFinite(number) && (kind != "integer" || number == Math.Truncate(number))
+                        && number >= double.Parse(J.S(spec, "low"), System.Globalization.CultureInfo.InvariantCulture)
+                        && number <= double.Parse(J.S(spec, "high"), System.Globalization.CultureInfo.InvariantCulture)
+                    : value.Length > 0;
+                if (valid) correctingFields.Remove(fieldId);
+            };
+        }
         return panel;
     }
 

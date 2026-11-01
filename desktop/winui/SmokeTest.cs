@@ -33,6 +33,7 @@ public sealed partial class MainWindow
             Activate();
             await Task.Delay(100);
             if (pages.Count != 5 || fields.Count < 40) throw new InvalidOperationException("页面或设置表单未加载。");
+            await CheckSettingsReviewRegressions();
             await CheckThemes();
             ShowCourseView(true, animate: false);
             if (showingMyCourses || CoursesReady || courseViews[1].Visibility != Visibility.Collapsed)
@@ -145,8 +146,60 @@ public sealed partial class MainWindow
         catch (Exception e) { message = e.Message; }
         Directory.CreateDirectory(smokeDestination);
         await File.WriteAllTextAsync(Path.Combine(smokeDestination, "result.json"), JsonSerializer.Serialize(new { success, message, frontend = "WinUI 3", animationsEnabled = motionSettings.AnimationsEnabled, pages = pages.Count, fields = fields.Count, courses = courses?.Items.Count, tasks = resultLists.GetValueOrDefault("tasks")?.Items.Count }));
+        Environment.ExitCode = success ? 0 : 1;
         if (!closing) await Call("discardAndClose");
         await FinishCloseAsync();
+    }
+
+    private async Task CheckSettingsReviewRegressions()
+    {
+        var originalValues = backend.State["values"]!.DeepClone();
+        try
+        {
+            foreach (string spelling in new[] { "True", "TRUE", "false", "False" })
+            {
+                foreach (var pair in fields.Where(p => p.Value is ToggleSwitch))
+                {
+                    string[] path = pair.Key.Split('.');
+                    backend.State["values"]![path[0]]![path[1]] = spelling;
+                }
+                Refresh(new JsonObject());
+                bool expected = spelling.Equals("true", StringComparison.OrdinalIgnoreCase);
+                if (fields.Values.OfType<ToggleSwitch>().Any(toggle => toggle.IsOn != expected))
+                    throw new InvalidOperationException("布尔配置大小写导致开关显示不一致。");
+                if (expected && !fields["common.work_max_retries"].IsEnabled)
+                    throw new InvalidOperationException("依赖开关没有接受大写布尔值。");
+            }
+        }
+        finally { backend.State["values"] = originalValues; Refresh(new JsonObject()); }
+
+        string retries = Value("common", "work_max_retries"), redo = Value("common", "work_redo_enabled");
+        var edit = (TextBox)fields["common.work_max_retries"];
+        try
+        {
+            await Call("setValue", "common", "work_max_retries", "invalid");
+            await Call("setValue", "common", "work_redo_enabled", "false");
+            if ((await Call("save"))?.ToString() == "true") throw new InvalidOperationException("无效重试次数未被校验。");
+            await WaitFor(() => correctingFields.Contains("common.work_max_retries") && edit.IsEnabled && edit.FocusState != FocusState.Unfocused);
+            edit.Text = "";
+            await WaitFor(() => Value("common", "work_max_retries") == "");
+            if (!edit.IsEnabled) throw new InvalidOperationException("编辑无效依赖字段时被再次禁用。");
+            edit.Text = "2";
+            await WaitFor(() => Value("common", "work_max_retries") == "2");
+            if (!edit.IsEnabled || (await Call("save"))?.ToString() != "true")
+                throw new InvalidOperationException("依赖关闭时无法完成字段修正。");
+            SaveButton.Focus(FocusState.Programmatic);
+            await WaitFor(() => !correctingFields.Contains("common.work_max_retries"));
+            Refresh(new JsonObject());
+            if (edit.IsEnabled) throw new InvalidOperationException("合法修正失焦后未恢复依赖禁用规则。");
+        }
+        finally
+        {
+            await Call("setValue", "common", "work_max_retries", retries);
+            await Call("setValue", "common", "work_redo_enabled", redo);
+            correctingFields.Remove("common.work_max_retries");
+            Refresh(new JsonObject());
+        }
     }
 
     private static T? VisualChild<T>(DependencyObject root, string? name = null) where T : FrameworkElement

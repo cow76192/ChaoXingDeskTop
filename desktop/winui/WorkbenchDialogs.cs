@@ -21,7 +21,18 @@ public sealed partial class MainWindow
                 if (Navigation.SelectedIndex == 2) revealServiceGroup?.Invoke(group);
             }
             if (fields.TryGetValue(section + "." + key, out var input))
-                DispatcherQueue.TryEnqueue(() => { input.IsEnabled = true; input.StartBringIntoView(); input.Focus(FocusState.Programmatic); });
+            {
+                correctingFields.Add(section + "." + key);
+                DispatcherQueue.TryEnqueue(async () =>
+                {
+                    // Navigation may still be revealing the destination page.
+                    // Focus only after the transition has made it visible.
+                    while (contentAnimations.ContainsKey(PageHost)) await Task.Delay(16);
+                    input.IsEnabled = !Busy;
+                    input.StartBringIntoView();
+                    input.Focus(FocusState.Programmatic);
+                });
+            }
         }
         else if (name == "startConfirmationRequested") EnqueueDialog(async () => await Call(await Confirm("确认本轮提交策略", args[0]?.ToString() ?? "", "按此策略开始") ? "confirmStartTasks" : "cancelStartTasks"));
         else if (name == "definitionPreviewRequested") EnqueueDialog(async () =>

@@ -1,5 +1,6 @@
 """Launch the native frontend; never silently fall back to another UI."""
 import os
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -42,7 +43,16 @@ def main():
         print('工作台已在运行，已切换到现有窗口。关闭现有窗口后再次运行 run.py 可加载更新。')
         return 0
     environment = dict(os.environ, CHAOXING_PYTHON=sys.executable, CHAOXING_BACKEND_ROOT=str(root))
+    smoke_report = None
+    if '--smoke-test' in sys.argv:
+        smoke_report = Path(sys.argv[sys.argv.index('--smoke-test') + 1]).resolve() / 'result.json'
+        # An old successful report cannot stand in for this process's result.
+        smoke_report.unlink(missing_ok=True)
     result = subprocess.call([str(executable), *sys.argv[1:]], env=environment, cwd=root)
+    if smoke_report is not None:
+        report = json.loads(smoke_report.read_text(encoding='utf-8'))
+        if report.get('success') is not True:
+            raise RuntimeError(report.get('message') or 'WinUI 界面验收失败。')
     if result:
         raise RuntimeError(f'WinUI 窗口异常退出（0x{result & 0xffffffff:08X}）。')
     return 0

@@ -62,7 +62,12 @@ public sealed class RecordRow : INotifyPropertyChanged
         {
             Subtitle = string.Join(" · ", new[] { J.S(data, "course"), J.S(data, "chapter"), J.S(data, "reason"), J.S(progress, "name") }.Where(s => s.Length > 0));
             Status = J.S(data, "statusText", J.S(data, "stageText", J.S(data, "status", J.S(data, "stage"))));
-            if (progress != null) Status += $" · {Progress:0}% · {J.S(progress, "statusText")}";
+            if (progress != null)
+            {
+                if (J.I(progress, "mediaTotal") > 1)
+                    Status += $" · 媒体 {J.I(progress, "mediaIndex")}/{J.I(progress, "mediaTotal")}";
+                Status += $" · 当前媒体 {Progress:0}% · {J.S(progress, "statusText")}";
+            }
         }
     }
 }

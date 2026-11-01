@@ -1,14 +1,36 @@
 import os
+import io
+from contextlib import redirect_stdout
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch, Mock
 
 from chaoxing_desktop.winui_app import find_frontend
+from chaoxing_desktop import winui_app
 from chaoxing_desktop.launch_bootstrap import project_python, relaunch_if_needed
 
 
 class WinUILauncherTests(unittest.TestCase):
+    def test_source_smoke_rejects_failed_report_even_with_zero_exit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory)
+            with patch('sys.argv', ['run.py', '--smoke-test', directory]), \
+                    patch.object(winui_app, 'find_frontend', return_value=Path('test.exe')), \
+                    patch.object(winui_app.subprocess, 'call', side_effect=lambda *a, **kw:
+                        ((destination / 'result.json').write_text('{"success":false,"message":"failed assertion"}', encoding='utf-8') and 0)):
+                with self.assertRaisesRegex(RuntimeError, 'failed assertion'):
+                    winui_app.main()
+
+    def test_source_smoke_rejects_stale_success_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / 'result.json').write_text('{"success":true}', encoding='utf-8')
+            with patch('sys.argv', ['run.py', '--smoke-test', directory]), \
+                    patch.object(winui_app, 'find_frontend', return_value=Path('test.exe')), \
+                    patch.object(winui_app.subprocess, 'call', return_value=0):
+                with self.assertRaises(FileNotFoundError):
+                    winui_app.main()
+
     def test_bootstrap_keeps_current_environment_when_dependencies_exist(self):
         with patch('chaoxing_desktop.launch_bootstrap.importlib.util.find_spec', return_value=object()), \
                 patch('chaoxing_desktop.launch_bootstrap.project_python') as find:
@@ -22,6 +44,17 @@ class WinUILauncherTests(unittest.TestCase):
                 patch('sys.argv', ['run.py', '--smoke-test', 'result path']):
             self.assertEqual(relaunch_if_needed(), 7)
             self.assertEqual(call.call_args.args[0][-2:], ['--smoke-test', 'result path'])
+
+    def test_relaunch_on_english_windows_output_encoding(self):
+        raw = io.BytesIO()
+        stream = io.TextIOWrapper(raw, encoding='cp1252', errors='strict')
+        with redirect_stdout(stream), \
+                patch('chaoxing_desktop.launch_bootstrap.importlib.util.find_spec', return_value=None), \
+                patch('chaoxing_desktop.launch_bootstrap.project_python', return_value=Path('project-python.exe')), \
+                patch('chaoxing_desktop.launch_bootstrap.subprocess.call', return_value=0):
+            self.assertEqual(relaunch_if_needed(), 0)
+        stream.flush()
+        self.assertIn(b'project-python.exe', raw.getvalue())
 
     def test_bootstrap_reports_missing_environment_without_installing_anything(self):
         with patch('chaoxing_desktop.launch_bootstrap.importlib.util.find_spec', return_value=None), \
