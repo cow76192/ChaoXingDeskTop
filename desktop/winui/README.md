@@ -43,7 +43,9 @@ Qt Core 及现有 Python 依赖保留在后台；这次迁移没有重写平台�
 
 构建和发布应使用新的空输出目录，以免上次构建留下的可选运行库影响体积统计。
 
-OCR 在媒体进度上报遇到图片验证码时按需初始化（`api/base.py` → `CaptchaRecovery.recover` → `ocr_init`），不是仅供验收使用。当前锁定的 ddddocr 在模块导入时强制加载 OpenCV，不能只删除 `cv2.pyd`；ONNX Runtime、NumPy 和识别模型也属于这条调用链。原生后台排除 NumPy 的 `_multiarray_tests` 测试扩展，安装包复制阶段排除 `.pdb` 调试符号；许可证、来源归档和依赖元数据继续保留。
+OCR 在媒体进度上报遇到图片验证码时按需初始化（`api/base.py` → `CaptchaRecovery.recover` → `ocr_init`），不是仅供验收使用。`api/ocr.py` 直接通过 Pillow、NumPy 和 ONNX Runtime CPU 推理，沿用 ddddocr 1.6.1 的 `common_old.onnx`、字符集、预处理及 CTC 解码行为，不导入其 Python 代码或 OpenCV。ddddocr wheel 仅提供模型及许可证，开发构建环境保留其完整依赖，用于新旧结果对照；发行后台明确排除 `cv2`、ddddocr Python 模块和 OpenCV 元数据。原生后台排除 NumPy 的 `_multiarray_tests` 测试扩展，安装包复制阶段排除 `.pdb` 调试符号；许可证、来源归档和其余依赖元数据继续保留。
+
+`run.py` 被全局 Python 或编辑器指定的 Python 启动且缺少 PySide6 时，会检查 `desktop/.venv`、仓库根目录 `.venv`、`desktop/.venv-build`、`desktop/.venv-ci`，使用能导入 Qt Core/Network 的环境重新启动，并保留参数和退出码；不会自动安装依赖。
 
 ## 验证
 

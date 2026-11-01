@@ -20,6 +20,7 @@ for dist in distributions():
     if canonicalize_name(name) in locked and canonicalize_name(name) not in {
         'pyinstaller', 'pyinstaller-hooks-contrib', 'pefile', 'pywin32-ctypes', 'altgraph',
         'pyside6-webengine', 'pyside6-pdf',
+        'opencv-python',
     }:
         metadata.extend(copy_metadata(name))
 
@@ -29,7 +30,7 @@ a = Analysis(
     datas=[(str(root / 'vendor/chaoxing/resource'), 'vendor/chaoxing/resource')]
           + collect_data_files('ddddocr', includes=['common_old.onnx']) + metadata,
     hiddenimports=collect_submodules('api') + ['chaoxing_desktop.runtime', 'lxml.etree', 'pyaes'],
-    excludes=['PySide6.QtWidgets', 'chaoxing_desktop.qml_app',
+    excludes=['cv2', 'ddddocr', 'PySide6.QtWidgets', 'chaoxing_desktop.qml_app',
               'PySide6.QtQuick', 'PySide6.QtQml', 'PySide6.QtQuickControls2',
               'PySide6.QtWebEngineCore', 'PySide6.QtWebEngineWidgets', 'PySide6.QtWebEngineQuick',
               'PySide6.QtPdf', 'PySide6.QtPdfWidgets', 'tkinter', 'celery', 'flask'],

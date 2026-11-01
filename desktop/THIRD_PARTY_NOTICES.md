@@ -1,5 +1,7 @@
 # 来源与许可
 
+验证码 OCR 精简：`vendor/chaoxing/api/ocr.py` 直接使用 Pillow、NumPy、ONNX Runtime CPU 完成预处理与推理，替代 ddddocr Python 运行入口。模型仍取自锁定的 ddddocr 1.6.1 wheel 的 `common_old.onnx`；`resource/ocr_charset.json` 提取自该版本 `models/charset_manager.py` 的 `_get_old_charset` 常量，顺序保持不变。项目来源 https://github.com/sml2h3/ddddocr ，MIT 许可证原文保留于 `vendor/chaoxing/resource/OCR-LICENSE.txt` 及分发依赖元数据。发行后台不包含 OpenCV；构建环境仍保留完整上游包，以提供原始模型与结果对照。
+
 桌面版：ChaoxingDesktop 0.4.2，GPL-3.0。完整许可见 LICENSE。
 
 0.4.2 合入 PR #1 的独立浏览器登录，使用既有 PySide6 的 QtWebSockets 与本机 Edge / Chrome 的本地调试接口获取 Cookie；不分发浏览器，不新增第三方依赖。其余来源与许可沿用 0.4.1。

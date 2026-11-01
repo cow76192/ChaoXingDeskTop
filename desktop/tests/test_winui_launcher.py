@@ -2,11 +2,43 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch, Mock
 
 from chaoxing_desktop.winui_app import find_frontend
+from chaoxing_desktop.launch_bootstrap import project_python, relaunch_if_needed
 
 
 class WinUILauncherTests(unittest.TestCase):
+    def test_bootstrap_keeps_current_environment_when_dependencies_exist(self):
+        with patch('chaoxing_desktop.launch_bootstrap.importlib.util.find_spec', return_value=object()), \
+                patch('chaoxing_desktop.launch_bootstrap.project_python') as find:
+            self.assertIsNone(relaunch_if_needed())
+            find.assert_not_called()
+
+    def test_global_python_relaunch_preserves_arguments_and_exit_status(self):
+        with patch('chaoxing_desktop.launch_bootstrap.importlib.util.find_spec', return_value=None), \
+                patch('chaoxing_desktop.launch_bootstrap.project_python', return_value=Path('project-python.exe')), \
+                patch('chaoxing_desktop.launch_bootstrap.subprocess.call', return_value=7) as call, \
+                patch('sys.argv', ['run.py', '--smoke-test', 'result path']):
+            self.assertEqual(relaunch_if_needed(), 7)
+            self.assertEqual(call.call_args.args[0][-2:], ['--smoke-test', 'result path'])
+
+    def test_bootstrap_reports_missing_environment_without_installing_anything(self):
+        with patch('chaoxing_desktop.launch_bootstrap.importlib.util.find_spec', return_value=None), \
+                patch('chaoxing_desktop.launch_bootstrap.project_python', return_value=None):
+            with self.assertRaisesRegex(RuntimeError, '虚拟环境'):
+                relaunch_if_needed()
+
+    def test_project_python_skips_broken_environment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / 'desktop'
+            for env in (root / '.venv', root.parent / '.venv'):
+                python = env / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
+                python.parent.mkdir(parents=True)
+                python.touch()
+            with patch('chaoxing_desktop.launch_bootstrap.subprocess.run', side_effect=[Mock(returncode=1), Mock(returncode=0)]):
+                self.assertEqual(project_python(root), root.parent / '.venv' / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python'))
+
     def test_selects_latest_complete_frontend_and_ignores_incomplete_output(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -34,6 +34,7 @@ def source_files(desktop: Path):
     files.extend(desktop / relative for relative in (
         "vendor/chaoxing/LICENSE", "vendor/chaoxing/resource/README.md",
         "vendor/chaoxing/resource/font_map_table.json",
+        "vendor/chaoxing/resource/ocr_charset.json", "vendor/chaoxing/resource/OCR-LICENSE.txt",
     ))
     return sorted(path for path in files if path.is_file() and not path.is_symlink())
 
